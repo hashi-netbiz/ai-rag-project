@@ -1,601 +1,1409 @@
-# Feature: Phase 5 — React Frontend
+# Feature: Next.js 15 Professional Frontend Redesign
 
-The following plan is complete. All stubs are in `frontend/src/`. Implementation order matters — each file depends on the one above it.
+The following plan is complete and ready for execution. Validate all file paths and imports before starting. Execute tasks in strict order — each phase depends on the previous.
 
 ## Feature Description
 
-Build the complete React TypeScript chat UI: JWT auth context, Axios service layer, Login form, Chat interface, message bubbles, and source citation chips. Replace the CRA boilerplate `App.tsx` with the actual app routing (Login ↔ Chat based on auth state).
+Replace the existing Create React App frontend (`frontend/`) with a professional Next.js 15 App Router frontend (`frontend-next/`). The new frontend uses TypeScript strict mode, Tailwind CSS v4, shadcn/ui components, Zustand state management, and Motion animations. It features a professional intranet chat UI with a sidebar, role-aware empty states, collapsible source citations, dark mode toggle, and a typing indicator.
 
 ## User Story
 
-As an employee,
-I want to log in with my username and password and send natural language queries,
-So that I receive role-appropriate answers with source citations in a clean chat interface.
+As a company employee,
+I want a modern, professional chat interface that reflects my role and access level,
+So that I can query internal knowledge with confidence and understand what information I can access.
 
 ## Problem Statement
 
-All 6 component/context/service files are empty stubs. `App.tsx` is the default CRA boilerplate. The frontend renders nothing useful.
+The existing CRA frontend is functional but dated. It lacks dark mode, professional styling, proper loading states, animated transitions, and a sidebar with user context. It also uses an aging CRA toolchain.
 
 ## Solution Statement
 
-Implement in dependency order:
-1. `services/api.ts` — Axios instance + login/query functions (no React dependencies)
-2. `contexts/AuthContext.tsx` — JWT state + localStorage persistence (depends on api.ts)
-3. `components/SourceCitation.tsx` — leaf component, no deps on other custom components
-4. `components/MessageBubble.tsx` — uses SourceCitation
-5. `components/Login.tsx` — uses AuthContext
-6. `components/Chat.tsx` — uses AuthContext + api.ts + MessageBubble
-7. `App.tsx` — wires AuthProvider + conditional Login/Chat render
-8. `App.css` — minimal viewport reset
+Build a new `frontend-next/` directory with Next.js 15 App Router, shadcn/ui, Zustand, and Motion. Use Next.js API route proxies to forward requests to FastAPI — avoiding CORS entirely. Run the new frontend on port 3001.
+
+**Status update:** Complete. The original CRA `frontend/` directory has been removed. `frontend-next/` is the sole frontend.
 
 ## Feature Metadata
 
-**Feature Type**: New Capability
-**Estimated Complexity**: Medium
-**Primary Systems Affected**: `frontend/src/`
-**Dependencies**: React 19, TypeScript 4.9.5, Axios 1.13.6 — all installed
+**Feature Type**: New Capability (parallel frontend, replaces CRA)
+**Estimated Complexity**: High
+**Primary Systems Affected**: `frontend-next/` (new), `backend/app/main.py` (CORS)
+**Dependencies**: Next.js 15, React 19, TypeScript 5, Tailwind CSS v4, shadcn/ui, Zustand 5, Motion 12, react-markdown, remark-gfm, geist
 
 ---
 
 ## CONTEXT REFERENCES
 
-### Backend API Contract (from Phase 3 & 4)
+### Existing Frontend Files — READ BEFORE IMPLEMENTING
+
+- `frontend/src/services/api.ts` — existing API client pattern (axios); mirror the function signatures in the new `lib/apiClient.ts` using native fetch
+- `frontend/src/contexts/AuthContext.tsx` — existing auth pattern; replicate in Zustand store with `hydrateFromStorage()`
+- `frontend/src/components/Chat.tsx` — existing message loop and loading state; new version expands this with sidebar, empty state, suggestions
+- `frontend/src/components/MessageBubble.tsx` — existing bubble layout; new version adds Markdown rendering and collapsible source citations
+- `frontend/src/components/SourceCitation.tsx` — existing pill; new version wraps in animated collapsible
+- `backend/app/main.py` line 17-23 — CORS middleware; **must add `http://localhost:3001`**
+- `backend/app/auth/router.py` — exact request/response shapes for `/auth/login` and `/auth/me`
+- `backend/app/chat/router.py` — exact request/response shape for `/chat/query`
+- `backend/app/auth/models.py` — Pydantic models that define the token and user response schemas
+
+### New Files to Create
 
 ```
-POST http://localhost:8000/auth/login
-Body: {"username": string, "password": string}
-Response: {"access_token": string, "token_type": "bearer", "role": string}
-Error 401: {"detail": "Incorrect username or password"}
+frontend-next/
+├── app/
+│   ├── globals.css
+│   ├── layout.tsx
+│   ├── page.tsx                    ← login page (/)
+│   ├── api/auth/login/route.ts     ← proxy → POST /auth/login
+│   ├── api/auth/me/route.ts        ← proxy → GET /auth/me
+│   ├── api/chat/query/route.ts     ← proxy → POST /chat/query
+│   └── chat/
+│       ├── layout.tsx
+│       └── page.tsx                ← main chat page (/chat)
+├── components/
+│   ├── ui/                         ← generated by shadcn (do not edit)
+│   ├── MessageBubble.tsx
+│   ├── RoleBadge.tsx
+│   ├── SourceCitation.tsx
+│   ├── ThemeToggle.tsx
+│   └── TypingIndicator.tsx
+├── lib/
+│   ├── apiClient.ts
+│   ├── constants.ts
+│   └── utils.ts                    ← generated by shadcn init
+├── stores/
+│   ├── authStore.ts
+│   └── chatStore.ts
+└── types/
+    └── api.ts
+```
 
-POST http://localhost:8000/chat/query
-Header: Authorization: Bearer <token>
-Body: {"query": string}
-Response: {
-  "answer": string,
-  "sources": [{"file": string, "section": string}],
-  "role": string
+### Backend API Contracts
+
+```
+POST /auth/login
+  body: { username: string, password: string }
+  response 200: { access_token: string, token_type: string, role: string }
+  response 401: { detail: string }
+
+GET /auth/me
+  header: Authorization: Bearer <token>
+  response 200: { username: string, role: string }
+
+POST /chat/query
+  header: Authorization: Bearer <token>
+  body: { query: string }
+  response 200: { answer: string, sources: [{file: string, section: string}], role: string }
+  response 401: { detail: string }
+  response 422: { detail: string }
+
+NOTE: /chat/query does NOT stream. Returns complete JSON. Do NOT use useChat or streaming patterns.
+```
+
+### Patterns to Follow
+
+**Auth pattern** — hydrate from localStorage on every page mount BEFORE running the auth guard:
+```typescript
+useEffect(() => { hydrateFromStorage() }, [hydrateFromStorage])
+useEffect(() => { if (!isAuthenticated) router.replace('/') }, [isAuthenticated, router])
+```
+
+**Error handling** — check for 401 in catch block and redirect to login:
+```typescript
+if (msg.includes('Session expired') || msg.includes('401')) {
+  clearAuth(); router.push('/'); return
 }
-Error 401: {"detail": "Not authenticated"}
-
-GET http://localhost:8000/health
-Response: {"status": "ok"}
 ```
 
-### Files to Implement (all stubs)
-- `frontend/src/services/api.ts`
-- `frontend/src/contexts/AuthContext.tsx`
-- `frontend/src/components/SourceCitation.tsx`
-- `frontend/src/components/MessageBubble.tsx`
-- `frontend/src/components/Login.tsx`
-- `frontend/src/components/Chat.tsx`
+**Tailwind v4 CSS config** — NO `tailwind.config.js`. All custom tokens go in `globals.css` under `@theme {}`.
 
-### Files to Replace
-- `frontend/src/App.tsx` — CRA boilerplate → auth-conditional render
-- `frontend/src/App.css` — CRA defaults → minimal app styles
+**shadcn `cn` import** — always import from `@/lib/utils`, never from shadcn component files directly.
 
-### Files to Keep Unchanged
-- `frontend/src/index.tsx`, `index.css`, `reportWebVitals.ts`, `setupTests.ts`, `react-app-env.d.ts`
+**Motion import** — use `motion/react`, not `framer-motion`:
+```typescript
+import { motion, AnimatePresence } from 'motion/react'
+```
+
+**`'use client'` directive** — required on every file that uses hooks, event handlers, or browser APIs. NOT needed on `app/layout.tsx` or `app/chat/layout.tsx` (pure layout wrappers).
+
+**`suppressHydrationWarning`** — add to `<html>` and `<body>` in `app/layout.tsx` to prevent dark-mode hydration mismatch.
+
+---
+
+## IMPLEMENTATION PLAN
+
+### Phase 0: Backend CORS Fix (do first)
+
+Add `http://localhost:3001` to `allow_origins` in `backend/app/main.py`.
+
+### Phase 1: Scaffold
+
+Run `create-next-app@15` to generate the project skeleton.
+
+### Phase 2: Dependencies
+
+Install Zustand, react-markdown, remark-gfm, Motion. Run `shadcn init` and `shadcn add` for components.
+
+### Phase 3: Configuration
+
+Update `globals.css` (Tailwind v4 `@theme` block), verify `tsconfig.json` strict mode, update `package.json` dev script to port 3001.
+
+### Phase 4: Core Types, Constants, Stores
+
+Create `types/api.ts`, `lib/constants.ts`, `stores/authStore.ts`, `stores/chatStore.ts`, `lib/apiClient.ts`.
+
+### Phase 5: API Route Proxies
+
+Create three Next.js route handlers under `app/api/` that forward to FastAPI.
+
+### Phase 6: Shared Components
+
+Create `RoleBadge`, `TypingIndicator`, `SourceCitation`, `MessageBubble`, `ThemeToggle`.
+
+### Phase 7: Pages
+
+Create `app/layout.tsx`, `app/page.tsx` (login), `app/chat/layout.tsx`, `app/chat/page.tsx`.
+
+### Phase 8: Validation
+
+Run TypeScript check, start dev server, test login and chat flows.
 
 ---
 
 ## STEP-BY-STEP TASKS
 
-### TASK 1 — IMPLEMENT `frontend/src/services/api.ts`
+### TASK 0: UPDATE `backend/app/main.py` — Add CORS origin
+
+- **FIND**: `allow_origins=["http://localhost:3000"],`
+- **REPLACE WITH**: `allow_origins=["http://localhost:3000", "http://localhost:3001"],`
+- **VALIDATE**: `cd backend && uv run python -c "from app.main import app; print('CORS OK')"`
+
+---
+
+### TASK 1: SCAFFOLD `frontend-next/` — Create Next.js project
+
+Run from `c:\Users\User\ai\rag_project\`:
+
+```bash
+npx create-next-app@15 frontend-next --typescript --tailwind --eslint --app --no-src-dir --import-alias "@/*"
+```
+
+Accept all defaults. When asked about Turbopack, answer **Yes**.
+
+- **GOTCHA**: `create-next-app@15` installs Tailwind v4 automatically. Do NOT additionally install `tailwindcss` manually — it is already present.
+- **VALIDATE**: `cd frontend-next && ls app/ components/ lib/` — directories must exist
+
+---
+
+### TASK 2: INSTALL additional npm packages
+
+Run from `frontend-next/`:
+
+```bash
+npm install zustand@5 react-markdown@9 remark-gfm@4 motion@12
+```
+
+- **GOTCHA**: `motion` (v12) is the rebranded Framer Motion. Import from `motion/react`, not `framer-motion`.
+- **VALIDATE**: `node -e "require('zustand'); require('react-markdown'); require('motion'); console.log('OK')"`
+
+---
+
+### TASK 3: INIT shadcn/ui
+
+Run from `frontend-next/`:
+
+```bash
+npx shadcn@latest init
+```
+
+When prompted:
+- Style → **Default**
+- Base color → **Neutral**
+- CSS variables → **Yes**
+
+Then add components:
+
+```bash
+npx shadcn@latest add button input label card badge separator scroll-area textarea tooltip
+```
+
+- **RESULT**: `components/ui/` populated, `lib/utils.ts` created with `cn()` helper, `components.json` created
+- **VALIDATE**: `ls components/ui/` — should list button.tsx, input.tsx, card.tsx, badge.tsx, etc.
+
+---
+
+### TASK 4: UPDATE `frontend-next/app/globals.css`
+
+Replace the entire file with:
+
+```css
+@import "tailwindcss";
+
+@theme {
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  --color-role-finance: oklch(0.527 0.154 150);
+  --color-role-marketing: oklch(0.558 0.228 292);
+  --color-role-hr: oklch(0.576 0.192 38);
+  --color-role-engineering: oklch(0.488 0.189 243);
+  --color-role-clevel: oklch(0.75 0.17 85);
+  --color-role-employee: oklch(0.55 0 0);
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
+  html {
+    height: 100%;
+  }
+  body {
+    height: 100%;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+```
+
+- **GOTCHA**: Tailwind v4 does NOT have `@tailwind base/components/utilities` directives. Only `@import "tailwindcss"`.
+- **VALIDATE**: Dev server compiles without CSS errors.
+
+---
+
+### TASK 5: UPDATE `frontend-next/package.json` scripts
+
+Change the `"dev"` script from `"next dev"` to `"next dev --port 3001"`:
+
+```json
+{
+  "scripts": {
+    "dev": "next dev --port 3001",
+    "build": "next build",
+    "start": "next start --port 3001",
+    "lint": "next lint",
+    "type-check": "tsc --noEmit"
+  }
+}
+```
+
+- **VALIDATE**: `npm run dev` starts on port 3001
+
+---
+
+### TASK 6: CREATE `frontend-next/types/api.ts`
 
 ```typescript
-import axios from 'axios';
-
-const BASE_URL = 'http://localhost:8000';
-
-const apiClient = axios.create({ baseURL: BASE_URL });
-
-// Attach stored JWT to every request
-apiClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem('token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
-});
+export interface LoginRequest {
+  username: string
+  password: string
+}
 
 export interface LoginResponse {
-  access_token: string;
-  token_type: string;
-  role: string;
+  access_token: string
+  token_type: string
+  role: string
+}
+
+export interface AuthUser {
+  username: string
+  role: string
 }
 
 export interface Source {
-  file: string;
-  section: string;
+  file: string
+  section: string
+}
+
+export interface QueryRequest {
+  query: string
 }
 
 export interface QueryResponse {
-  answer: string;
-  sources: Source[];
-  role: string;
+  answer: string
+  sources: Source[]
+  role: string
 }
 
-export const login = async (username: string, password: string): Promise<LoginResponse> => {
-  const response = await apiClient.post<LoginResponse>('/auth/login', { username, password });
-  return response.data;
-};
-
-export const chatQuery = async (query: string): Promise<QueryResponse> => {
-  const response = await apiClient.post<QueryResponse>('/chat/query', { query });
-  return response.data;
-};
-
-export default apiClient;
-```
-
-- **VALIDATE**: TypeScript compiles — checked via `cd frontend && npx tsc --noEmit`
-
----
-
-### TASK 2 — IMPLEMENT `frontend/src/contexts/AuthContext.tsx`
-
-```typescript
-import React, { createContext, useContext, useState, ReactNode } from 'react';
-import { login as apiLogin, LoginResponse } from '../services/api';
-
-interface AuthUser {
-  username: string;
-  role: string;
-}
-
-interface AuthContextType {
-  user: AuthUser | null;
-  token: string | null;
-  isAuthenticated: boolean;
-  login: (username: string, password: string) => Promise<void>;
-  logout: () => void;
-}
-
-const AuthContext = createContext<AuthContextType | null>(null);
-
-export function AuthProvider({ children }: { children: ReactNode }) {
-  const [token, setToken] = useState<string | null>(() => localStorage.getItem('token'));
-  const [user, setUser] = useState<AuthUser | null>(() => {
-    const stored = localStorage.getItem('user');
-    return stored ? JSON.parse(stored) : null;
-  });
-
-  const login = async (username: string, password: string): Promise<void> => {
-    const data: LoginResponse = await apiLogin(username, password);
-    localStorage.setItem('token', data.access_token);
-    localStorage.setItem('user', JSON.stringify({ username, role: data.role }));
-    setToken(data.access_token);
-    setUser({ username, role: data.role });
-  };
-
-  const logout = () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    setToken(null);
-    setUser(null);
-  };
-
-  return (
-    <AuthContext.Provider value={{ user, token, isAuthenticated: !!token, login, logout }}>
-      {children}
-    </AuthContext.Provider>
-  );
-}
-
-export function useAuth(): AuthContextType {
-  const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
-  return ctx;
+export interface ApiError {
+  detail: string
 }
 ```
 
-- **GOTCHA**: `useState` initializer reads from `localStorage` synchronously — safe in browser, not in SSR (not relevant here).
-- **VALIDATE**: `cd frontend && npx tsc --noEmit`
+- **VALIDATE**: `npx tsc --noEmit` — no errors on types file
 
 ---
 
-### TASK 3 — IMPLEMENT `frontend/src/components/SourceCitation.tsx`
+### TASK 7: CREATE `frontend-next/lib/constants.ts`
 
 ```typescript
-import React from 'react';
-import { Source } from '../services/api';
+export const FASTAPI_BASE_URL = 'http://localhost:8000'
 
-interface Props {
-  source: Source;
+export const ROLE_COLORS: Record<string, string> = {
+  finance: 'bg-green-600',
+  marketing: 'bg-purple-600',
+  hr: 'bg-orange-500',
+  engineering: 'bg-blue-600',
+  c_level: 'bg-yellow-500',
+  employee: 'bg-neutral-500',
 }
 
-export default function SourceCitation({ source }: Props) {
-  const label = source.section ? `${source.file} › ${source.section}` : source.file;
-  return (
-    <span style={{
-      display: 'inline-block',
-      background: '#e8f4fd',
-      border: '1px solid #b3d9f5',
-      borderRadius: '12px',
-      padding: '2px 10px',
-      fontSize: '0.75rem',
-      color: '#1a6ea0',
-      margin: '2px 4px 2px 0',
-    }}>
-      📄 {label}
-    </span>
-  );
+export const ROLE_LABELS: Record<string, string> = {
+  finance: 'Finance',
+  marketing: 'Marketing',
+  hr: 'HR',
+  engineering: 'Engineering',
+  c_level: 'C-Level',
+  employee: 'Employee',
+}
+
+export const ROLE_SUGGESTIONS: Record<string, string[]> = {
+  finance: [
+    'What is our current gross margin?',
+    'Summarize the quarterly financial report.',
+    'What were the key budget variances this quarter?',
+  ],
+  marketing: [
+    'What were the results of the latest campaign?',
+    'Summarize our brand positioning strategy.',
+    'What is our target customer segment?',
+  ],
+  hr: [
+    'What is the current headcount by department?',
+    'Summarize the employee handbook leave policies.',
+    'What is our referral bonus policy?',
+  ],
+  engineering: [
+    'Describe the high-level system architecture.',
+    'What databases are used in the data layer?',
+    'What is the authentication standard?',
+  ],
+  c_level: [
+    'Give me an executive summary of company performance.',
+    'What are the top financial metrics this quarter?',
+    'Summarize headcount and department breakdown.',
+  ],
+  employee: [
+    'What is the annual leave entitlement?',
+    'What is the work-from-home policy?',
+    'When is salary credited each month?',
+  ],
 }
 ```
 
----
-
-### TASK 4 — IMPLEMENT `frontend/src/components/MessageBubble.tsx`
-
-```typescript
-import React from 'react';
-import SourceCitation from './SourceCitation';
-import { Source } from '../services/api';
-
-interface Props {
-  role: 'user' | 'assistant';
-  content: string;
-  sources?: Source[];
-}
-
-export default function MessageBubble({ role, content, sources }: Props) {
-  const isUser = role === 'user';
-  return (
-    <div style={{
-      display: 'flex',
-      justifyContent: isUser ? 'flex-end' : 'flex-start',
-      marginBottom: '12px',
-    }}>
-      <div style={{
-        maxWidth: '75%',
-        background: isUser ? '#0078d4' : '#f3f4f6',
-        color: isUser ? '#fff' : '#1f2937',
-        borderRadius: isUser ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
-        padding: '10px 14px',
-        boxShadow: '0 1px 2px rgba(0,0,0,0.08)',
-      }}>
-        <p style={{ margin: 0, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{content}</p>
-        {sources && sources.length > 0 && (
-          <div style={{ marginTop: '8px' }}>
-            {sources.map((s, i) => (
-              <SourceCitation key={i} source={s} />
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-```
+- **VALIDATE**: `npx tsc --noEmit` — no errors
 
 ---
 
-### TASK 5 — IMPLEMENT `frontend/src/components/Login.tsx`
+### TASK 8: CREATE `frontend-next/stores/authStore.ts`
 
 ```typescript
-import React, { useState, FormEvent } from 'react';
-import { useAuth } from '../contexts/AuthContext';
+'use client'
 
-export default function Login() {
-  const { login } = useAuth();
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [error, setError] = useState('');
-  const [loading, setLoading] = useState(false);
+import { create } from 'zustand'
+import type { AuthUser } from '@/types/api'
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    setError('');
-    setLoading(true);
-    try {
-      await login(username, password);
-    } catch {
-      setError('Invalid username or password');
-    } finally {
-      setLoading(false);
+interface AuthState {
+  token: string | null
+  user: AuthUser | null
+  isAuthenticated: boolean
+  setAuth: (token: string, user: AuthUser) => void
+  clearAuth: () => void
+  hydrateFromStorage: () => void
+}
+
+export const useAuthStore = create<AuthState>((set) => ({
+  token: null,
+  user: null,
+  isAuthenticated: false,
+
+  setAuth: (token, user) => {
+    localStorage.setItem('token', token)
+    localStorage.setItem('user', JSON.stringify(user))
+    set({ token, user, isAuthenticated: true })
+  },
+
+  clearAuth: () => {
+    localStorage.removeItem('token')
+    localStorage.removeItem('user')
+    set({ token: null, user: null, isAuthenticated: false })
+  },
+
+  hydrateFromStorage: () => {
+    if (typeof window === 'undefined') return
+    const token = localStorage.getItem('token')
+    const userRaw = localStorage.getItem('user')
+    if (token && userRaw) {
+      try {
+        const user: AuthUser = JSON.parse(userRaw) as AuthUser
+        set({ token, user, isAuthenticated: true })
+      } catch {
+        localStorage.removeItem('token')
+        localStorage.removeItem('user')
+      }
     }
-  };
-
-  return (
-    <div style={{
-      minHeight: '100vh', display: 'flex', alignItems: 'center',
-      justifyContent: 'center', background: '#f9fafb',
-    }}>
-      <div style={{
-        background: '#fff', borderRadius: '12px', padding: '40px',
-        boxShadow: '0 4px 24px rgba(0,0,0,0.08)', width: '340px',
-      }}>
-        <h1 style={{ margin: '0 0 8px', fontSize: '1.5rem', color: '#111827' }}>
-          Company Assistant
-        </h1>
-        <p style={{ margin: '0 0 24px', color: '#6b7280', fontSize: '0.9rem' }}>
-          Sign in to access your knowledge base
-        </p>
-        <form onSubmit={handleSubmit}>
-          <label style={{ display: 'block', marginBottom: '4px', fontSize: '0.85rem', color: '#374151' }}>
-            Username
-          </label>
-          <input
-            type="text"
-            value={username}
-            onChange={(e) => setUsername(e.target.value)}
-            required
-            style={{
-              width: '100%', padding: '9px 12px', borderRadius: '8px',
-              border: '1px solid #d1d5db', marginBottom: '16px',
-              fontSize: '0.95rem', boxSizing: 'border-box',
-            }}
-          />
-          <label style={{ display: 'block', marginBottom: '4px', fontSize: '0.85rem', color: '#374151' }}>
-            Password
-          </label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-            style={{
-              width: '100%', padding: '9px 12px', borderRadius: '8px',
-              border: '1px solid #d1d5db', marginBottom: '20px',
-              fontSize: '0.95rem', boxSizing: 'border-box',
-            }}
-          />
-          {error && (
-            <p style={{ color: '#ef4444', fontSize: '0.85rem', margin: '0 0 16px' }}>{error}</p>
-          )}
-          <button
-            type="submit"
-            disabled={loading}
-            style={{
-              width: '100%', padding: '10px', background: loading ? '#93c5fd' : '#0078d4',
-              color: '#fff', border: 'none', borderRadius: '8px',
-              fontSize: '0.95rem', cursor: loading ? 'not-allowed' : 'pointer',
-            }}
-          >
-            {loading ? 'Signing in…' : 'Sign in'}
-          </button>
-        </form>
-      </div>
-    </div>
-  );
-}
+  },
+}))
 ```
+
+- **GOTCHA**: `'use client'` at the top is required — Zustand stores that use `localStorage` cannot run server-side.
+- **VALIDATE**: `npx tsc --noEmit`
 
 ---
 
-### TASK 6 — IMPLEMENT `frontend/src/components/Chat.tsx`
+### TASK 9: CREATE `frontend-next/stores/chatStore.ts`
 
 ```typescript
-import React, { useState, useRef, useEffect, FormEvent } from 'react';
-import { useAuth } from '../contexts/AuthContext';
-import { chatQuery, Source } from '../services/api';
-import MessageBubble from './MessageBubble';
+'use client'
 
-interface Message {
-  role: 'user' | 'assistant';
-  content: string;
-  sources?: Source[];
+import { create } from 'zustand'
+import type { Source } from '@/types/api'
+
+export interface ChatMessage {
+  id: string
+  role: 'user' | 'assistant'
+  content: string
+  sources?: Source[]
+  isError?: boolean
 }
 
-export default function Chat() {
-  const { user, logout } = useAuth();
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(false);
-  const bottomRef = useRef<HTMLDivElement>(null);
+interface ChatState {
+  messages: ChatMessage[]
+  isLoading: boolean
+  addUserMessage: (content: string) => string
+  addAssistantMessage: (content: string, sources?: Source[]) => void
+  addErrorMessage: (content: string) => void
+  setLoading: (loading: boolean) => void
+  clearMessages: () => void
+}
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+let idCounter = 0
+const genId = () => `msg-${(++idCounter).toString()}-${Date.now().toString()}`
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
-    const query = input.trim();
-    if (!query || loading) return;
+export const useChatStore = create<ChatState>((set) => ({
+  messages: [],
+  isLoading: false,
 
-    setInput('');
-    setMessages((prev) => [...prev, { role: 'user', content: query }]);
-    setLoading(true);
+  addUserMessage: (content) => {
+    const id = genId()
+    set((state) => ({
+      messages: [...state.messages, { id, role: 'user', content }],
+    }))
+    return id
+  },
 
-    try {
-      const result = await chatQuery(query);
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: result.answer, sources: result.sources },
-      ]);
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: 'Something went wrong. Please try again.' },
-      ]);
-    } finally {
-      setLoading(false);
-    }
-  };
+  addAssistantMessage: (content, sources) => {
+    set((state) => ({
+      messages: [
+        ...state.messages,
+        { id: genId(), role: 'assistant', content, sources },
+      ],
+    }))
+  },
 
-  const ROLE_COLORS: Record<string, string> = {
-    finance: '#16a34a', marketing: '#d97706', hr: '#7c3aed',
-    engineering: '#0369a1', c_level: '#dc2626', employee: '#6b7280',
-  };
-  const roleColor = ROLE_COLORS[user?.role ?? ''] ?? '#6b7280';
+  addErrorMessage: (content) => {
+    set((state) => ({
+      messages: [
+        ...state.messages,
+        { id: genId(), role: 'assistant', content, isError: true },
+      ],
+    }))
+  },
+
+  setLoading: (isLoading) => set({ isLoading }),
+
+  clearMessages: () => set({ messages: [] }),
+}))
+```
+
+- **VALIDATE**: `npx tsc --noEmit`
+
+---
+
+### TASK 10: CREATE `frontend-next/lib/apiClient.ts`
+
+```typescript
+import type { LoginResponse, QueryResponse } from '@/types/api'
+
+function getToken(): string | null {
+  if (typeof window === 'undefined') return null
+  return localStorage.getItem('token')
+}
+
+function authHeaders(): HeadersInit {
+  const token = getToken()
+  return token ? { Authorization: `Bearer ${token}` } : {}
+}
+
+export async function apiLogin(
+  username: string,
+  password: string,
+): Promise<LoginResponse> {
+  const res = await fetch('/api/auth/login', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ username, password }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: 'Login failed' })) as { detail?: string }
+    throw new Error(err.detail ?? 'Login failed')
+  }
+  return res.json() as Promise<LoginResponse>
+}
+
+export async function apiChatQuery(query: string): Promise<QueryResponse> {
+  const res = await fetch('/api/chat/query', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(),
+    },
+    body: JSON.stringify({ query }),
+  })
+  if (!res.ok) {
+    if (res.status === 401) throw new Error('Session expired. Please log in again.')
+    const err = await res.json().catch(() => ({ detail: 'Query failed' })) as { detail?: string }
+    throw new Error(err.detail ?? 'Query failed')
+  }
+  return res.json() as Promise<QueryResponse>
+}
+```
+
+- **VALIDATE**: `npx tsc --noEmit`
+
+---
+
+### TASK 11: CREATE `frontend-next/app/api/auth/login/route.ts`
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server'
+import { FASTAPI_BASE_URL } from '@/lib/constants'
+
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  const body: unknown = await req.json()
+
+  const upstream = await fetch(`${FASTAPI_BASE_URL}/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+
+  const data: unknown = await upstream.json()
+  return NextResponse.json(data, { status: upstream.status })
+}
+```
+
+- **GOTCHA**: No `'use client'` on API route handlers — they are server-only.
+- **VALIDATE**: `curl -X POST http://localhost:3001/api/auth/login -H "Content-Type: application/json" -d '{"username":"alice","password":"pass123"}'` → returns `access_token`
+
+---
+
+### TASK 12: CREATE `frontend-next/app/api/auth/me/route.ts`
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server'
+import { FASTAPI_BASE_URL } from '@/lib/constants'
+
+export async function GET(req: NextRequest): Promise<NextResponse> {
+  const authHeader = req.headers.get('Authorization') ?? ''
+
+  const upstream = await fetch(`${FASTAPI_BASE_URL}/auth/me`, {
+    headers: { Authorization: authHeader },
+  })
+
+  const data: unknown = await upstream.json()
+  return NextResponse.json(data, { status: upstream.status })
+}
+```
+
+- **VALIDATE**: Returns 401 when called without auth header
+
+---
+
+### TASK 13: CREATE `frontend-next/app/api/chat/query/route.ts`
+
+```typescript
+import { NextRequest, NextResponse } from 'next/server'
+import { FASTAPI_BASE_URL } from '@/lib/constants'
+
+export async function POST(req: NextRequest): Promise<NextResponse> {
+  const authHeader = req.headers.get('Authorization') ?? ''
+  const body: unknown = await req.json()
+
+  const upstream = await fetch(`${FASTAPI_BASE_URL}/chat/query`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: authHeader,
+    },
+    body: JSON.stringify(body),
+  })
+
+  const data: unknown = await upstream.json()
+  return NextResponse.json(data, { status: upstream.status })
+}
+```
+
+- **GOTCHA**: The `Authorization` header MUST be forwarded. Without it, FastAPI returns 401 for every chat query.
+- **VALIDATE**: Login via proxy, then test: `TOKEN=<from login>; curl -X POST http://localhost:3001/api/chat/query -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d '{"query":"What is the leave policy?"}'`
+
+---
+
+### TASK 14: CREATE `frontend-next/components/RoleBadge.tsx`
+
+```typescript
+'use client'
+
+import { Badge } from '@/components/ui/badge'
+import { ROLE_COLORS, ROLE_LABELS } from '@/lib/constants'
+import { cn } from '@/lib/utils'
+
+interface RoleBadgeProps {
+  role: string
+  className?: string
+}
+
+export function RoleBadge({ role, className }: RoleBadgeProps) {
+  const colorClass = ROLE_COLORS[role] ?? 'bg-neutral-500'
+  const label = ROLE_LABELS[role] ?? role
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', background: '#f9fafb' }}>
-      {/* Header */}
-      <div style={{
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '12px 20px', background: '#fff', borderBottom: '1px solid #e5e7eb',
-        boxShadow: '0 1px 3px rgba(0,0,0,0.06)',
-      }}>
-        <div>
-          <span style={{ fontWeight: 600, fontSize: '1rem', color: '#111827' }}>
-            Company Assistant
-          </span>
-          {user && (
-            <span style={{
-              marginLeft: '10px', background: roleColor, color: '#fff',
-              borderRadius: '12px', padding: '2px 10px', fontSize: '0.75rem',
-            }}>
-              {user.role}
-            </span>
-          )}
-        </div>
-        <button
-          onClick={logout}
-          style={{
-            background: 'none', border: '1px solid #d1d5db', borderRadius: '8px',
-            padding: '6px 14px', cursor: 'pointer', fontSize: '0.85rem', color: '#374151',
-          }}
-        >
-          Sign out
-        </button>
-      </div>
+    <Badge
+      className={cn(
+        colorClass,
+        'text-white border-0 text-xs font-medium select-none',
+        className,
+      )}
+    >
+      {label}
+    </Badge>
+  )
+}
+```
 
-      {/* Messages */}
-      <div style={{ flex: 1, overflowY: 'auto', padding: '20px' }}>
-        {messages.length === 0 && (
-          <p style={{ textAlign: 'center', color: '#9ca3af', marginTop: '60px' }}>
-            Ask a question about company data
-          </p>
-        )}
-        {messages.map((msg, i) => (
-          <MessageBubble key={i} role={msg.role} content={msg.content} sources={msg.sources} />
-        ))}
-        {loading && (
-          <MessageBubble role="assistant" content="Thinking…" />
-        )}
-        <div ref={bottomRef} />
-      </div>
+- **VALIDATE**: Renders without TypeScript errors
 
-      {/* Input */}
-      <form
-        onSubmit={handleSubmit}
-        style={{
-          display: 'flex', gap: '10px', padding: '16px 20px',
-          background: '#fff', borderTop: '1px solid #e5e7eb',
-        }}
-      >
-        <input
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask a question…"
-          disabled={loading}
-          style={{
-            flex: 1, padding: '10px 14px', borderRadius: '24px',
-            border: '1px solid #d1d5db', fontSize: '0.95rem', outline: 'none',
+---
+
+### TASK 15: CREATE `frontend-next/components/TypingIndicator.tsx`
+
+```typescript
+'use client'
+
+import { motion } from 'motion/react'
+
+export function TypingIndicator() {
+  return (
+    <div className="flex items-center gap-1 px-4 py-3 bg-neutral-100 dark:bg-neutral-800 rounded-2xl rounded-bl-sm w-fit">
+      {[0, 1, 2].map((i) => (
+        <motion.span
+          key={i}
+          className="block w-2 h-2 rounded-full bg-neutral-400 dark:bg-neutral-500"
+          animate={{ y: [0, -6, 0] }}
+          transition={{
+            duration: 0.6,
+            repeat: Infinity,
+            delay: i * 0.15,
+            ease: 'easeInOut',
           }}
         />
-        <button
-          type="submit"
-          disabled={loading || !input.trim()}
-          style={{
-            padding: '10px 20px', background: loading ? '#93c5fd' : '#0078d4',
-            color: '#fff', border: 'none', borderRadius: '24px',
-            cursor: loading ? 'not-allowed' : 'pointer', fontSize: '0.95rem',
-          }}
-        >
-          Send
-        </button>
-      </form>
+      ))}
     </div>
-  );
+  )
 }
 ```
 
+- **VALIDATE**: `npx tsc --noEmit`
+
 ---
 
-### TASK 7 — REPLACE `frontend/src/App.tsx`
+### TASK 16: CREATE `frontend-next/components/SourceCitation.tsx`
 
 ```typescript
-import React from 'react';
-import { AuthProvider, useAuth } from './contexts/AuthContext';
-import Login from './components/Login';
-import Chat from './components/Chat';
+'use client'
 
-function AppContent() {
-  const { isAuthenticated } = useAuth();
-  return isAuthenticated ? <Chat /> : <Login />;
+import { useState } from 'react'
+import { ChevronDown, ChevronUp, FileText } from 'lucide-react'
+import { motion, AnimatePresence } from 'motion/react'
+import type { Source } from '@/types/api'
+
+interface SourceCitationProps {
+  sources: Source[]
 }
 
-export default function App() {
+export function SourceCitation({ sources }: SourceCitationProps) {
+  const [open, setOpen] = useState(false)
+
+  if (sources.length === 0) return null
+
   return (
-    <AuthProvider>
-      <AppContent />
-    </AuthProvider>
-  );
+    <div className="mt-3 border-t border-neutral-200 dark:border-neutral-700 pt-2">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex items-center gap-1 text-xs text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 transition-colors"
+        aria-expanded={open}
+        type="button"
+      >
+        {open ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+        {sources.length} source{sources.length > 1 ? 's' : ''}
+      </button>
+
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden"
+          >
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {sources.map((source, i) => {
+                const label = source.section
+                  ? `${source.file} › ${source.section}`
+                  : source.file
+                return (
+                  <span
+                    key={i}
+                    className="inline-flex items-center gap-1 bg-blue-50 dark:bg-blue-950 border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 rounded-full px-2.5 py-0.5 text-xs"
+                  >
+                    <FileText size={10} />
+                    {label}
+                  </span>
+                )
+              })}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  )
 }
 ```
 
-- **GOTCHA**: `useAuth()` must be called inside a component that is a child of `AuthProvider`. `AppContent` is a child of `AuthProvider` in `App`. Do NOT call `useAuth()` directly in `App`.
+- **VALIDATE**: `npx tsc --noEmit`
 
 ---
 
-### TASK 8 — REPLACE `frontend/src/App.css`
+### TASK 17: CREATE `frontend-next/components/MessageBubble.tsx`
 
-```css
-*, *::before, *::after {
-  box-sizing: border-box;
+```typescript
+'use client'
+
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { AlertCircle } from 'lucide-react'
+import { cn } from '@/lib/utils'
+import { SourceCitation } from '@/components/SourceCitation'
+import type { ChatMessage } from '@/stores/chatStore'
+
+interface MessageBubbleProps {
+  message: ChatMessage
 }
 
-body, html, #root {
-  margin: 0;
-  padding: 0;
-  height: 100%;
+export function MessageBubble({ message }: MessageBubbleProps) {
+  const isUser = message.role === 'user'
+
+  return (
+    <div className={cn('flex w-full mb-4', isUser ? 'justify-end' : 'justify-start')}>
+      <div
+        className={cn(
+          'max-w-[75%] rounded-2xl px-4 py-3 shadow-sm text-sm leading-relaxed',
+          isUser
+            ? 'bg-blue-600 text-white rounded-br-sm'
+            : 'bg-neutral-100 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 rounded-bl-sm',
+          message.isError &&
+            'bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800',
+        )}
+      >
+        {message.isError && (
+          <div className="flex items-center gap-2 mb-1">
+            <AlertCircle size={14} />
+            <span className="font-medium text-xs">Error</span>
+          </div>
+        )}
+
+        {isUser ? (
+          <p className="whitespace-pre-wrap m-0">{message.content}</p>
+        ) : (
+          <div className="prose prose-sm dark:prose-invert max-w-none">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {message.content}
+            </ReactMarkdown>
+          </div>
+        )}
+
+        {!isUser && message.sources && message.sources.length > 0 && (
+          <SourceCitation sources={message.sources} />
+        )}
+      </div>
+    </div>
+  )
 }
 ```
+
+- **GOTCHA**: `prose` classes require `@tailwindcss/typography`. Install if missing: `npm install @tailwindcss/typography` then add `@plugin "@tailwindcss/typography";` to `globals.css`.
+- **VALIDATE**: `npx tsc --noEmit`
 
 ---
 
-### TASK 9 — VERIFY TypeScript compile + build
+### TASK 18: CREATE `frontend-next/components/ThemeToggle.tsx`
 
-```bash
-cd frontend && npx tsc --noEmit
-cd frontend && npm run build 2>&1 | tail -10
+```typescript
+'use client'
+
+import { useEffect, useState } from 'react'
+import { Moon, Sun } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+
+export function ThemeToggle() {
+  const [isDark, setIsDark] = useState(false)
+
+  useEffect(() => {
+    const stored = localStorage.getItem('theme')
+    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
+    const dark = stored === 'dark' || (!stored && prefersDark)
+    setIsDark(dark)
+    document.documentElement.classList.toggle('dark', dark)
+  }, [])
+
+  const toggle = () => {
+    const next = !isDark
+    setIsDark(next)
+    document.documentElement.classList.toggle('dark', next)
+    localStorage.setItem('theme', next ? 'dark' : 'light')
+  }
+
+  return (
+    <Button
+      variant="ghost"
+      size="icon"
+      onClick={toggle}
+      aria-label={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+      className="text-neutral-500 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-neutral-100"
+    >
+      {isDark ? <Sun size={16} /> : <Moon size={16} />}
+    </Button>
+  )
+}
 ```
+
+- **VALIDATE**: `npx tsc --noEmit`
+
+---
+
+### TASK 19: CREATE `frontend-next/app/layout.tsx`
+
+```typescript
+import type { Metadata } from 'next'
+import { GeistSans } from 'geist/font/sans'
+import { GeistMono } from 'geist/font/mono'
+import './globals.css'
+
+export const metadata: Metadata = {
+  title: 'Company Assistant',
+  description: 'Role-based intranet knowledge assistant',
+}
+
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  return (
+    <html lang="en" suppressHydrationWarning>
+      <body
+        className={`${GeistSans.variable} ${GeistMono.variable} font-sans antialiased bg-white dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100`}
+        suppressHydrationWarning
+      >
+        {children}
+      </body>
+    </html>
+  )
+}
+```
+
+- **GOTCHA**: `suppressHydrationWarning` on both `<html>` and `<body>` is required to prevent React 19 hydration mismatch from dark mode class toggling.
+- **GOTCHA**: The `geist` package is a separate npm package — install it if not auto-installed: `npm install geist`
+- **VALIDATE**: `npx tsc --noEmit`
+
+---
+
+### TASK 20: CREATE `frontend-next/app/page.tsx` — Login page
+
+```typescript
+'use client'
+
+import { useState, useEffect, type FormEvent } from 'react'
+import { useRouter } from 'next/navigation'
+import { motion } from 'motion/react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import { useAuthStore } from '@/stores/authStore'
+import { apiLogin } from '@/lib/apiClient'
+import { Building2 } from 'lucide-react'
+
+export default function LoginPage() {
+  const router = useRouter()
+  const { setAuth, isAuthenticated, hydrateFromStorage } = useAuthStore()
+
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    hydrateFromStorage()
+  }, [hydrateFromStorage])
+
+  useEffect(() => {
+    if (isAuthenticated) {
+      router.replace('/chat')
+    }
+  }, [isAuthenticated, router])
+
+  const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    setError('')
+    setLoading(true)
+    try {
+      const data = await apiLogin(username, password)
+      setAuth(data.access_token, { username, role: data.role })
+      router.push('/chat')
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Invalid username or password',
+      )
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-neutral-50 dark:bg-neutral-950 p-4">
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.3 }}
+        className="w-full max-w-sm"
+      >
+        <Card className="shadow-lg border-neutral-200 dark:border-neutral-800">
+          <CardHeader className="space-y-2 pb-4">
+            <div className="flex items-center gap-2">
+              <Building2 size={22} className="text-blue-600" />
+              <CardTitle className="text-xl">Company Assistant</CardTitle>
+            </div>
+            <CardDescription>
+              Sign in to access your role-based knowledge base
+            </CardDescription>
+          </CardHeader>
+
+          <CardContent>
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-1.5">
+                <Label htmlFor="username">Username</Label>
+                <Input
+                  id="username"
+                  type="text"
+                  autoComplete="username"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                  placeholder="e.g. alice"
+                  required
+                  disabled={loading}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label htmlFor="password">Password</Label>
+                <Input
+                  id="password"
+                  type="password"
+                  autoComplete="current-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="••••••••"
+                  required
+                  disabled={loading}
+                />
+              </div>
+
+              {error && (
+                <motion.p
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  className="text-sm text-red-600 dark:text-red-400"
+                  role="alert"
+                >
+                  {error}
+                </motion.p>
+              )}
+
+              <Button
+                type="submit"
+                className="w-full"
+                disabled={loading || !username || !password}
+              >
+                {loading ? 'Signing in…' : 'Sign in'}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      </motion.div>
+    </div>
+  )
+}
+```
+
+- **VALIDATE**: `http://localhost:3001` renders login card; login with alice/pass123 redirects to `/chat`
+
+---
+
+### TASK 21: CREATE `frontend-next/app/chat/layout.tsx`
+
+```typescript
+import type { ReactNode } from 'react'
+
+export default function ChatLayout({ children }: { children: ReactNode }) {
+  return <div className="h-screen flex overflow-hidden">{children}</div>
+}
+```
+
+- **VALIDATE**: `npx tsc --noEmit`
+
+---
+
+### TASK 22: CREATE `frontend-next/app/chat/page.tsx` — Main chat page
+
+```typescript
+'use client'
+
+import {
+  useEffect,
+  useRef,
+  useState,
+  type FormEvent,
+  type KeyboardEvent,
+} from 'react'
+import { useRouter } from 'next/navigation'
+import { motion, AnimatePresence } from 'motion/react'
+import { Send, LogOut, Building2, Trash2 } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { Textarea } from '@/components/ui/textarea'
+import { ScrollArea } from '@/components/ui/scroll-area'
+import { Separator } from '@/components/ui/separator'
+import { MessageBubble } from '@/components/MessageBubble'
+import { TypingIndicator } from '@/components/TypingIndicator'
+import { RoleBadge } from '@/components/RoleBadge'
+import { ThemeToggle } from '@/components/ThemeToggle'
+import { useAuthStore } from '@/stores/authStore'
+import { useChatStore } from '@/stores/chatStore'
+import { apiChatQuery } from '@/lib/apiClient'
+import { ROLE_SUGGESTIONS } from '@/lib/constants'
+
+export default function ChatPage() {
+  const router = useRouter()
+  const { user, isAuthenticated, clearAuth, hydrateFromStorage } = useAuthStore()
+  const {
+    messages,
+    isLoading,
+    addUserMessage,
+    addAssistantMessage,
+    addErrorMessage,
+    setLoading,
+    clearMessages,
+  } = useChatStore()
+
+  const [input, setInput] = useState('')
+  const bottomRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    hydrateFromStorage()
+  }, [hydrateFromStorage])
+
+  useEffect(() => {
+    if (!isAuthenticated) {
+      router.replace('/')
+    }
+  }, [isAuthenticated, router])
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, isLoading])
+
+  const handleLogout = () => {
+    clearAuth()
+    clearMessages()
+    router.push('/')
+  }
+
+  const sendQuery = async (query: string) => {
+    const trimmed = query.trim()
+    if (!trimmed || isLoading) return
+
+    setInput('')
+    addUserMessage(trimmed)
+    setLoading(true)
+
+    try {
+      const result = await apiChatQuery(trimmed)
+      addAssistantMessage(result.answer, result.sources)
+    } catch (err) {
+      const msg =
+        err instanceof Error
+          ? err.message
+          : 'Something went wrong. Please try again.'
+      if (msg.includes('Session expired') || msg.includes('401')) {
+        clearAuth()
+        router.push('/')
+        return
+      }
+      addErrorMessage(msg)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSubmit = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault()
+    void sendQuery(input)
+  }
+
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      void sendQuery(input)
+    }
+  }
+
+  const suggestions =
+    user ? (ROLE_SUGGESTIONS[user.role] ?? ROLE_SUGGESTIONS['employee'] ?? []) : []
+
+  if (!user) return null
+
+  return (
+    <>
+      {/* Sidebar */}
+      <aside className="w-64 flex-shrink-0 border-r border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 flex flex-col">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-200 dark:border-neutral-800">
+          <div className="flex items-center gap-2">
+            <Building2 size={18} className="text-blue-600" />
+            <span className="font-semibold text-sm">Company Assistant</span>
+          </div>
+          <ThemeToggle />
+        </div>
+
+        <div className="px-4 py-4 space-y-2">
+          <p className="text-xs text-neutral-500 dark:text-neutral-400 uppercase tracking-wider font-medium">
+            Signed in as
+          </p>
+          <p className="text-sm font-medium truncate">{user.username}</p>
+          <RoleBadge role={user.role} />
+        </div>
+
+        <Separator />
+
+        <div className="flex-1 px-4 py-3">
+          <p className="text-xs text-neutral-400 dark:text-neutral-600">
+            Conversation history coming soon
+          </p>
+        </div>
+
+        <div className="px-4 py-4 space-y-2 border-t border-neutral-200 dark:border-neutral-800">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={clearMessages}
+            className="w-full justify-start gap-2 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100"
+          >
+            <Trash2 size={14} />
+            Clear chat
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={handleLogout}
+            className="w-full justify-start gap-2 text-neutral-600 dark:text-neutral-400 hover:text-red-600 dark:hover:text-red-400"
+          >
+            <LogOut size={14} />
+            Sign out
+          </Button>
+        </div>
+      </aside>
+
+      {/* Main */}
+      <main className="flex-1 flex flex-col overflow-hidden bg-neutral-50 dark:bg-neutral-950">
+        <div className="flex items-center justify-between px-6 py-3 bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 shadow-sm">
+          <div>
+            <h1 className="text-sm font-semibold">Knowledge Base Chat</h1>
+            <p className="text-xs text-neutral-500 dark:text-neutral-400">
+              Answers grounded in documents you are authorized to see
+            </p>
+          </div>
+          <RoleBadge role={user.role} />
+        </div>
+
+        <ScrollArea className="flex-1 px-6 py-4">
+          <AnimatePresence initial={false}>
+            {messages.length === 0 ? (
+              <motion.div
+                key="empty"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                className="flex flex-col items-center justify-center min-h-[400px] text-center"
+              >
+                <Building2
+                  size={40}
+                  className="text-neutral-300 dark:text-neutral-700 mb-4"
+                />
+                <h2 className="text-base font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+                  Welcome, {user.username}
+                </h2>
+                <p className="text-sm text-neutral-400 dark:text-neutral-500 mb-6 max-w-xs">
+                  You have access to{' '}
+                  <span className="font-medium capitalize">
+                    {user.role.replace('_', ' ')}
+                  </span>{' '}
+                  documents. Ask anything.
+                </p>
+                <div className="space-y-2 w-full max-w-sm">
+                  {suggestions.map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => void sendQuery(s)}
+                      className="w-full text-left text-sm px-4 py-2.5 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors"
+                      type="button"
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+              </motion.div>
+            ) : (
+              messages.map((msg) => (
+                <motion.div
+                  key={msg.id}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.2 }}
+                >
+                  <MessageBubble message={msg} />
+                </motion.div>
+              ))
+            )}
+          </AnimatePresence>
+
+          {isLoading && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              className="flex justify-start mb-4"
+            >
+              <TypingIndicator />
+            </motion.div>
+          )}
+
+          <div ref={bottomRef} />
+        </ScrollArea>
+
+        <div className="px-6 py-4 bg-white dark:bg-neutral-900 border-t border-neutral-200 dark:border-neutral-800">
+          <form onSubmit={handleSubmit} className="flex gap-3 items-end">
+            <Textarea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder={`Ask about ${user.role.replace('_', ' ')} information…`}
+              disabled={isLoading}
+              rows={1}
+              className="flex-1 resize-none min-h-[42px] max-h-32 bg-neutral-50 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 focus-visible:ring-blue-500"
+            />
+            <Button
+              type="submit"
+              disabled={isLoading || !input.trim()}
+              className="bg-blue-600 hover:bg-blue-700 text-white shrink-0"
+            >
+              <Send size={16} />
+              <span className="ml-1.5">Send</span>
+            </Button>
+          </form>
+          <p className="text-xs text-neutral-400 dark:text-neutral-600 mt-1.5">
+            Enter to send · Shift+Enter for new line
+          </p>
+        </div>
+      </main>
+    </>
+  )
+}
+```
+
+- **VALIDATE**: Full login + chat flow works at `http://localhost:3001`
 
 ---
 
 ## VALIDATION COMMANDS
 
-### Level 1: TypeScript compile (no errors)
 ```bash
-cd frontend && npx tsc --noEmit
-```
+# Level 1: TypeScript — must exit 0
+cd frontend-next && npm run type-check
 
-### Level 2: Production build succeeds
-```bash
-cd frontend && npm run build 2>&1 | tail -10
-```
+# Level 2: Lint
+cd frontend-next && npm run lint
 
-### Level 3: Dev server starts
-```bash
-cd frontend && npm start &
-sleep 5
-curl -s http://localhost:3000 | grep -o '<div id="root">' || echo "root div not found"
-kill %1
+# Level 3: API proxy
+curl -X POST http://localhost:3001/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username":"alice","password":"pass123"}'
+# Expected: {"access_token":"...","role":"finance"}
+
+# Level 4: Manual UI tests
+# a. Open http://localhost:3001 — login card appears
+# b. Login as frank/pass123 → redirected to /chat
+# c. Role badge shows "Employee" in neutral color
+# d. Empty state shows 3 employee-role suggestions
+# e. Click a suggestion → sends query, typing indicator appears, response arrives
+# f. Ask "What is the gross margin?" as frank → "I don't have access..."
+# g. Logout → redirected to login
+# h. Login as alice/pass123 → ask "What is the gross margin?" → gets financial data
+# i. Source citations collapse/expand correctly
+# j. Dark mode toggle in sidebar works and persists on refresh
+# k. Shift+Enter in textarea adds new line; Enter sends
 ```
 
 ---
 
 ## ACCEPTANCE CRITERIA
 
-- [ ] TypeScript compiles with zero errors
-- [ ] `npm run build` succeeds
-- [ ] Dev server starts on port 3000
-- [ ] Login form renders when unauthenticated
-- [ ] Successful login renders Chat UI with role badge
-- [ ] Failed login shows error message
-- [ ] Sending a query shows answer + source citation chips
-- [ ] Sign out returns to Login screen and clears localStorage
+- [ ] `npm run type-check` exits 0 with no errors
+- [ ] `npm run lint` exits 0
+- [ ] Login page renders at `http://localhost:3001`
+- [ ] Successful login redirects to `/chat`
+- [ ] Returning visitor with stored token skips login
+- [ ] Unauthenticated visit to `/chat` redirects to `/`
+- [ ] Role badge color correct for all 6 roles
+- [ ] 3 role-appropriate suggestions shown in empty state
+- [ ] Typing indicator animates during fetch
+- [ ] User messages right-aligned blue, assistant left-aligned neutral
+- [ ] Source citations collapsible, showing file › section
+- [ ] RBAC enforced: frank cannot see financial data
+- [ ] c_level user (eve) can query all departments
+- [ ] Dark mode toggle works and persists
+- [ ] Clear chat returns to empty state
+- [ ] Sign out clears localStorage and redirects
 
 ---
 
 ## NOTES
 
-**No external style library**: All styling is done with inline styles — no Tailwind, Bootstrap, or CSS modules. This avoids any new dependency and keeps the build clean.
+**Why no assistant-ui or Vercel AI SDK**: The FastAPI `/chat/query` endpoint is non-streaming (returns complete JSON). These libraries expect SSE streams. Using them would require a Next.js middleware shim that buffers the full response and re-emits it as a stream — unnecessary complexity. Zustand + fetch is simpler, fully typed, and zero overhead.
 
-**`App.test.tsx`**: The existing default test checks for "learn react" text — it will break after we replace `App.tsx`. It should be deleted or updated. For MVP purposes, deleting it is acceptable since no test strategy is defined for the frontend. Updated to `export {};` stub.
+**Typography plugin**: `prose` classes in `MessageBubble.tsx` require `@tailwindcss/typography`. Install and add `@plugin "@tailwindcss/typography";` to `globals.css` if Tailwind v4 doesn't auto-detect it.
 
-**CORS**: Backend is already configured for `http://localhost:3000` — no changes needed.
+**Port assignment**: CRA stays on 3000. Next.js runs on 3001. Both can coexist.
 
-**`logo.svg` import**: The current `App.tsx` imports `logo.svg`. After replacement, this import is gone. The file can stay in `src/` — it just won't be referenced.
+**CORS**: The API route proxy means the browser never contacts `localhost:8000` directly — the Next.js server does. CORS on FastAPI is only needed if calling FastAPI directly from a browser. Adding `localhost:3001` to the CORS list is defensive hygiene.
