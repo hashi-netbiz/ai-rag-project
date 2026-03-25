@@ -18,7 +18,9 @@ The existing CRA frontend is functional but dated. It lacks dark mode, professio
 
 ## Solution Statement
 
-Build a new `frontend-next/` directory with Next.js 15 App Router, shadcn/ui, Zustand, and Motion. Use Next.js API route proxies to forward requests to FastAPI — avoiding CORS entirely. Keep the existing CRA frontend untouched as a fallback. Run the new frontend on port 3001.
+Build a new `frontend-next/` directory with Next.js 15 App Router, shadcn/ui, Zustand, and Motion. Use Next.js API route proxies to forward requests to FastAPI — avoiding CORS entirely. Run the new frontend on port 3001.
+
+**Status update:** Complete. The original CRA `frontend/` directory has been removed. `frontend-next/` is the sole frontend.
 
 ## Feature Metadata
 
