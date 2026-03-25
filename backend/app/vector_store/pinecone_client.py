@@ -24,7 +24,7 @@ def get_vectorstore() -> PineconeVectorStore:
     )
 
 
-def get_retriever(allowed_departments: list[str], k: int = 5) -> VectorStoreRetriever:
+def get_retriever(allowed_departments: list[str], k: int = 10) -> VectorStoreRetriever:
     """Return a Pinecone retriever pre-filtered to the given departments."""
     vectorstore = get_vectorstore()
     return vectorstore.as_retriever(

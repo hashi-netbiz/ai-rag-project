@@ -3,6 +3,7 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.documents import Document
 from langsmith import traceable
+from pinecone import Pinecone
 
 from app.config import settings
 from app.rbac.permissions import get_allowed_departments
@@ -23,6 +24,24 @@ _prompt = ChatPromptTemplate.from_messages([
 
 def _get_llm() -> ChatGroq:
     return ChatGroq(model=GROQ_MODEL, groq_api_key=settings.groq_api_key)
+
+
+def _rerank(query: str, docs: list[Document], top_n: int = 3) -> list[Document]:
+    """Rerank retrieved docs using Pinecone bge-reranker-v2-m3, return top_n."""
+    if len(docs) <= top_n:
+        return docs
+    try:
+        pc = Pinecone(api_key=settings.pinecone_api_key)
+        result = pc.inference.rerank(
+            model="bge-reranker-v2-m3",
+            query=query,
+            documents=[doc.page_content for doc in docs],
+            top_n=top_n,
+            return_documents=False,
+        )
+        return [docs[item.index] for item in result.data]
+    except Exception:
+        return docs[:top_n]
 
 
 def _extract_sources(docs: list[Document]) -> list[dict]:
@@ -61,6 +80,9 @@ def rag_query(query: str, role: str) -> dict:
             "sources": [],
             "role": role,
         }
+
+    # Rerank to top 3 most relevant chunks
+    docs = _rerank(query, docs, top_n=3)
 
     # Build context string
     context = "\n\n---\n\n".join(doc.page_content for doc in docs)

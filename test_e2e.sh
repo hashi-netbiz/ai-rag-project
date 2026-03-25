@@ -125,7 +125,7 @@ assert_contains "Finance cannot see HR data" "$body" "don't have access\|do not 
 # finance (alice) cannot see marketing data
 body=$(curl -s -X POST "$BACKEND/chat/query" \
   -H "Content-Type: application/json" -H "Authorization: Bearer $ALICE_TOKEN" \
-  -d '{"query":"What is the total marketing budget?"}')
+  -d '{"query":"What was the Return on Ad Spend for digital campaigns?"}')
 assert_contains "Finance cannot see marketing data" "$body" "don't have access\|do not have access\|I don"
 
 # =============================================================================

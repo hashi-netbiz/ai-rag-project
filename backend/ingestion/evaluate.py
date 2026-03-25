@@ -31,9 +31,11 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
 # ---------------------------------------------------------------------------
 # Now safe to import app modules — os.environ is fully populated.
 # ---------------------------------------------------------------------------
+from pinecone import Pinecone                               # noqa: E402
 from app.chat.rag_service import rag_query            # noqa: E402
 from app.vector_store.pinecone_client import get_retriever  # noqa: E402
 from app.rbac.permissions import get_allowed_departments    # noqa: E402
+from app.config import settings                             # noqa: E402
 
 
 # ===========================================================================
@@ -283,8 +285,22 @@ def run_evaluation() -> None:
             # the retrieved Document objects, but Ragas requires context strings
             allowed_depts = get_allowed_departments(role)
             if allowed_depts:
-                retriever = get_retriever(allowed_depts)
+                retriever = get_retriever(allowed_depts, k=10)
                 docs = retriever.invoke(question)
+                # Rerank to top 3 to match production behaviour
+                if len(docs) > 3:
+                    try:
+                        _pc = Pinecone(api_key=settings.pinecone_api_key)
+                        reranked = _pc.inference.rerank(
+                            model="bge-reranker-v2-m3",
+                            query=question,
+                            documents=[d.page_content for d in docs],
+                            top_n=3,
+                            return_documents=False,
+                        )
+                        docs = [docs[item.index] for item in reranked.data]
+                    except Exception:
+                        docs = docs[:3]
                 context_texts = [doc.page_content for doc in docs]
             else:
                 context_texts = []
