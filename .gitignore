@@ -2,3 +2,24 @@ bash.exe.stackdump
 *.stackdump
 .env
 .env.*
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+backend/.venv/
+backend/evaluation_results.csv
+
+# Node
+node_modules/
+frontend/.env.local
+frontend-next/.env.local
+frontend-next/.next/
+frontend-next/tsconfig.tsbuildinfo
+
+# Claude
+.claude/worktrees/
+.claude/settings.local.json
+
+# Screenshots
+e2e-screenshots/

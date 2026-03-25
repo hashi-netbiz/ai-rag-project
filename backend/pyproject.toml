@@ -1,0 +1,30 @@
+[project]
+name = "rag-rbac-chatbot"
+version = "0.1.0"
+description = "RAG-based RBAC chatbot for company intranet"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.110.0",
+    "uvicorn[standard]",
+    "langchain>=0.2.0",
+    "langchain-groq",
+    "langchain-pinecone",
+    "langchain-google-genai",
+    "google-generativeai",
+    "pinecone>=3.0.0",
+    "python-jose[cryptography]",
+    "passlib[bcrypt]",
+    "langsmith",
+    "ragas>=0.1.0",
+    "pandas",
+    "python-dotenv",
+    "tiktoken",
+    "pydantic-settings",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["app", "ingestion"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
