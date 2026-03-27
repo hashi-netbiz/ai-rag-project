@@ -68,7 +68,7 @@ jobs:
         with:
           project: "rag-rbac-chatbot"
           path: "."
-          format: "HTML,JSON"
+          format: "HTML"
           out: "dependency-check-report"
           args: >
             --enableRetired
