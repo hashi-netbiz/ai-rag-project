@@ -20,6 +20,7 @@ dependencies = [
     "python-dotenv",
     "tiktoken",
     "pydantic-settings",
+    "langchain-anthropic>=1.4.0",
 ]
 
 [tool.hatch.build.targets.wheel]

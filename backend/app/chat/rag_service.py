@@ -71,7 +71,7 @@ def rag_query(query: str, role: str) -> dict:
         }
 
     # Retrieve relevant chunks (RBAC filter applied server-side)
-    retriever = get_retriever(allowed_depts)
+    retriever = get_retriever(allowed_depts, k=6)
     docs = retriever.invoke(query)
 
     if not docs:
