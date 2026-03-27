@@ -1,4 +1,4 @@
-export const FASTAPI_BASE_URL = 'http://localhost:8000'
+export const FASTAPI_BASE_URL = process.env.FASTAPI_BASE_URL ?? 'http://localhost:8000'
 
 export const ROLE_COLORS: Record<string, string> = {
   finance: 'bg-green-600',

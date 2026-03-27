@@ -1,0 +1,336 @@
+name: CI/CD
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [master]
+
+env:
+  BACKEND_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/rag-backend
+  FRONTEND_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/rag-frontend
+
+jobs:
+
+  # ── [1] Secret scanning — fail fast gate ─────────────────────────────────
+  gitleaks:
+    name: Gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ── [2a] SAST ─────────────────────────────────────────────────────────────
+  sonarcloud:
+    name: SonarCloud
+    runs-on: ubuntu-latest
+    needs: gitleaks
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v4
+      - name: Install dev deps
+        run: uv sync --frozen --group dev
+        working-directory: backend
+      - name: Run tests with coverage
+        run: uv run pytest tests/ --cov=app --cov-report=xml
+        working-directory: backend
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          PINECONE_API_KEY: ${{ secrets.PINECONE_API_KEY }}
+          PINECONE_INDEX_NAME: ${{ secrets.PINECONE_INDEX_NAME }}
+          JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
+          LANGCHAIN_API_KEY: ${{ secrets.LANGCHAIN_API_KEY }}
+          LANGCHAIN_TRACING_V2: "false"
+          LANGCHAIN_PROJECT: test
+      - uses: SonarSource/sonarcloud-github-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  # ── [2b] SCA ──────────────────────────────────────────────────────────────
+  sca:
+    name: OWASP Dependency-Check
+    runs-on: ubuntu-latest
+    needs: gitleaks
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dependency-check/Dependency-Check_Action@main
+        with:
+          project: "rag-rbac-chatbot"
+          path: "."
+          format: "HTML,JSON"
+          out: "dependency-check-report"
+          args: >
+            --enableRetired
+            --scan backend/pyproject.toml
+            --scan frontend-next/package-lock.json
+            --failOnCVSS 7
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: dependency-check-report
+          path: dependency-check-report/
+          retention-days: 30
+
+  # ── [2c] Unit tests ───────────────────────────────────────────────────────
+  unit-tests:
+    name: Backend unit tests
+    runs-on: ubuntu-latest
+    needs: gitleaks
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - uses: astral-sh/setup-uv@v4
+      - name: Install dev deps
+        run: uv sync --frozen --group dev
+        working-directory: backend
+      - name: Run tests
+        run: uv run pytest tests/ -v --cov=app --cov-report=xml --cov-report=term-missing
+        working-directory: backend
+        env:
+          GROQ_API_KEY: test
+          GOOGLE_API_KEY: test
+          PINECONE_API_KEY: test
+          PINECONE_INDEX_NAME: test
+          JWT_SECRET_KEY: test-secret-key-32-chars-minimum!!
+          JWT_ALGORITHM: HS256
+          JWT_EXPIRE_MINUTES: "60"
+          LANGCHAIN_API_KEY: test
+          LANGCHAIN_TRACING_V2: "false"
+          LANGCHAIN_PROJECT: test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: backend/coverage.xml
+
+  # ── [2d] Frontend lint & typecheck ────────────────────────────────────────
+  lint-and-typecheck:
+    name: Frontend lint & typecheck
+    runs-on: ubuntu-latest
+    needs: gitleaks
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend-next/package-lock.json
+      - name: Install deps
+        run: npm ci
+        working-directory: frontend-next
+      - name: Type check
+        run: npm run type-check
+        working-directory: frontend-next
+      - name: Lint
+        run: npm run lint
+        working-directory: frontend-next
+
+  # ── [3] Docker build ──────────────────────────────────────────────────────
+  docker-build:
+    name: Docker build
+    runs-on: ubuntu-latest
+    needs: [sonarcloud, sca, unit-tests, lint-and-typecheck]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build backend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.backend
+          push: false
+          outputs: type=docker,dest=/tmp/backend-image.tar
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Build frontend image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.frontend
+          build-args: FASTAPI_BASE_URL=http://backend:8000
+          push: false
+          outputs: type=docker,dest=/tmp/frontend-image.tar
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docker-images
+          path: /tmp/*.tar
+          retention-days: 1
+
+  # ── [4] Container scan ────────────────────────────────────────────────────
+  trivy:
+    name: Trivy container scan
+    runs-on: ubuntu-latest
+    needs: docker-build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: docker-images
+          path: /tmp
+      - name: Load images
+        run: |
+          docker load --input /tmp/backend-image.tar
+          docker load --input /tmp/frontend-image.tar
+      - name: Get backend image name
+        id: backend-img
+        run: echo "name=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep rag-backend | head -1)" >> $GITHUB_OUTPUT
+      - name: Get frontend image name
+        id: frontend-img
+        run: echo "name=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep rag-frontend | head -1)" >> $GITHUB_OUTPUT
+      - name: Scan backend image
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          image-ref: ${{ steps.backend-img.outputs.name }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: 1
+          format: sarif
+          output: trivy-backend.sarif
+      - name: Scan frontend image
+        uses: aquasecurity/trivy-action@0.29.0
+        with:
+          image-ref: ${{ steps.frontend-img.outputs.name }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: 1
+          format: sarif
+          output: trivy-frontend.sarif
+      - name: Upload backend SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-backend.sarif
+      - name: Upload frontend SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: trivy-frontend.sarif
+
+  # ── [5] Docker push (master only) ─────────────────────────────────────────
+  docker-push:
+    name: Push to Docker Hub
+    runs-on: ubuntu-latest
+    needs: trivy
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Push backend
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.backend
+          push: true
+          tags: |
+            ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+            ${{ env.BACKEND_IMAGE }}:latest
+          cache-from: type=gha
+      - name: Push frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.frontend
+          build-args: FASTAPI_BASE_URL=http://backend:8000
+          push: true
+          tags: |
+            ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+            ${{ env.FRONTEND_IMAGE }}:latest
+          cache-from: type=gha
+
+  # ── [6] DAST (master only) ────────────────────────────────────────────────
+  dast:
+    name: OWASP ZAP DAST
+    runs-on: ubuntu-latest
+    needs: trivy
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: docker-images
+          path: /tmp
+      - name: Load images
+        run: |
+          docker load --input /tmp/backend-image.tar
+          docker load --input /tmp/frontend-image.tar
+      - name: Write .env for docker compose
+        run: |
+          cat > backend/.env << 'EOF'
+          GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}
+          GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}
+          PINECONE_API_KEY=${{ secrets.PINECONE_API_KEY }}
+          PINECONE_INDEX_NAME=${{ secrets.PINECONE_INDEX_NAME }}
+          JWT_SECRET_KEY=${{ secrets.JWT_SECRET_KEY }}
+          JWT_ALGORITHM=HS256
+          JWT_EXPIRE_MINUTES=60
+          LANGCHAIN_API_KEY=${{ secrets.LANGCHAIN_API_KEY }}
+          LANGCHAIN_TRACING_V2=true
+          LANGCHAIN_PROJECT=rag-rbac-chatbot
+          EOF
+      - name: Start stack
+        run: docker compose up -d
+      - name: Wait for backend health
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/health && break || sleep 5
+          done
+      - name: ZAP scan — frontend
+        uses: zaproxy/action-baseline@v0.13.0
+        with:
+          target: http://localhost:3001
+          fail_action: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: ZAP scan — backend API
+        uses: zaproxy/action-baseline@v0.13.0
+        with:
+          target: http://localhost:8000
+          fail_action: false
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tear down stack
+        if: always()
+        run: docker compose down
+
+  # ── [7] GitOps update (master only, stub) ─────────────────────────────────
+  gitops-update:
+    name: GitOps update
+    runs-on: ubuntu-latest
+    needs: [docker-push, dast]
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ secrets.GITOPS_REPO }}
+          token: ${{ secrets.GITOPS_TOKEN }}
+          path: gitops-repo
+      - name: Update image tags
+        run: |
+          cd gitops-repo
+          # kustomize: kustomize edit set image rag-backend=${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+          # sed: sed -i "s|rag-backend:.*|rag-backend:${{ github.sha }}|" manifests/deployment.yaml
+          echo "TODO: fill in manifest update command"
+      - name: Commit and push
+        run: |
+          cd gitops-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          git diff --cached --quiet || git commit -m "chore: update rag images to ${{ github.sha }}"
+          git push
