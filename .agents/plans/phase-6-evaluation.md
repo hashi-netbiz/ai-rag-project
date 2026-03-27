@@ -37,7 +37,7 @@ Implement `evaluate.py` to run 30 hardcoded test Q&A pairs through `rag_query()`
 
 ### Already Implemented — Do NOT Modify
 - `backend/app/chat/rag_service.py` — `rag_query(query, role) -> {answer, sources, role}`; decorated `@traceable`; does NOT return retrieved Document objects
-- `backend/app/vector_store/pinecone_client.py` — `get_retriever(allowed_departments, k=5) -> VectorStoreRetriever`
+- `backend/app/vector_store/pinecone_client.py` — `get_retriever(allowed_departments, k=6) -> VectorStoreRetriever`
 - `backend/app/rbac/permissions.py` — `get_allowed_departments(role) -> list[str]`
 - `backend/app/config.py` — `settings` singleton with `groq_api_key`, `google_api_key`
 
