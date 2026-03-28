@@ -6,6 +6,7 @@ from app.vector_store.pinecone_client import (
     EMBEDDING_MODEL,
     EMBEDDING_DIMENSION,
 )
+from app.config import settings
 
 
 # ── _get_embeddings ────────────────────────────────────────────────────────────
@@ -35,7 +36,7 @@ def test_get_vectorstore_passes_index_name():
         get_vectorstore()
     kwargs = mock_vs_cls.call_args.kwargs
     assert "index_name" in kwargs
-    assert kwargs["index_name"] == "test"   # value set in conftest
+    assert kwargs["index_name"] == settings.pinecone_index_name
 
 
 def test_get_vectorstore_passes_api_key():
