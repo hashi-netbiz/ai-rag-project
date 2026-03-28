@@ -296,14 +296,14 @@ jobs:
             python3 -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')" 2>/dev/null && break || sleep 5
           done
       - name: ZAP scan — frontend
-        uses: zaproxy/action-baseline@v0.13.0
+        uses: zaproxy/action-baseline@v0.15.0
         with:
           target: http://localhost:3001
           fail_action: false
           token: ${{ secrets.GITHUB_TOKEN }}
           artifact_name: zap-frontend
       - name: ZAP scan — backend API
-        uses: zaproxy/action-baseline@v0.13.0
+        uses: zaproxy/action-baseline@v0.15.0
         with:
           target: http://localhost:8000
           fail_action: false
