@@ -48,10 +48,11 @@ def _extract_sources(docs: list[Document]) -> list[dict[str, str]]:
     """Deduplicate and extract source citations from retrieved documents."""
     seen: set[tuple[str, str]] = set()
     sources: list[dict[str, str]] = []
-
+    
     for doc in docs:
-        source_file = doc.metadata.get("source_file", "")
-        section = doc.metadata.get("section", "")
+        source_file = str(doc.metadata.get("source_file", "")).strip()
+        section = str(doc.metadata.get("section", "")).strip()
+
         key = (source_file, section)
 
         if key not in seen:
