@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [master]
 
+permissions:
+  contents: read
+  security-events: write
+
 env:
   BACKEND_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/rag-backend
   FRONTEND_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/rag-frontend
@@ -206,15 +210,17 @@ jobs:
           format: sarif
           output: trivy-frontend.sarif
       - name: Upload backend SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: trivy-backend.sarif
+          category: trivy-backend
       - name: Upload frontend SARIF
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         if: always()
         with:
           sarif_file: trivy-frontend.sarif
+          category: trivy-frontend
 
   # ── [5] Docker push (master only) ─────────────────────────────────────────
   docker-push:
