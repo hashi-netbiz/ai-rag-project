@@ -44,17 +44,20 @@ def _rerank(query: str, docs: list[Document], top_n: int = 3) -> list[Document]:
         return docs[:top_n]
 
 
-def _extract_sources(docs: list[Document]) -> list[dict]:
+def _extract_sources(docs: list[Document]) -> list[dict[str, str]]:
     """Deduplicate and extract source citations from retrieved documents."""
-    seen: set[tuple] = set()
-    sources: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    sources: list[dict[str, str]] = []
+
     for doc in docs:
-        file = doc.metadata.get("source_file", "")
+        source_file = doc.metadata.get("source_file", "")
         section = doc.metadata.get("section", "")
-        key = (file, section)
+        key = (source_file, section)
+
         if key not in seen:
             seen.add(key)
-            sources.append({"file": file, "section": section})
+            sources.append({"file": source_file, "section": section})
+
     return sources
 
 
