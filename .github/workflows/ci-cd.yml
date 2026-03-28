@@ -12,6 +12,7 @@ permissions:
   issues: write
 
 env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   BACKEND_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/rag-backend
   FRONTEND_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/rag-frontend
 
@@ -22,7 +23,7 @@ jobs:
     name: Gitleaks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
       - uses: gitleaks/gitleaks-action@v2
@@ -35,10 +36,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: gitleaks
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - uses: astral-sh/setup-uv@v4
@@ -68,7 +69,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: gitleaks
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: dependency-check/Dependency-Check_Action@main
         with:
           project: "rag-rbac-chatbot"
@@ -93,8 +94,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: gitleaks
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
       - uses: astral-sh/setup-uv@v4
@@ -126,8 +127,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: gitleaks
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: "20"
           cache: "npm"
@@ -148,7 +149,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [sonarcloud, sca, unit-tests, lint-and-typecheck]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
       - name: Build backend image
         uses: docker/build-push-action@v6
@@ -183,7 +184,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: docker-build
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
         with:
           name: docker-images
@@ -230,7 +231,7 @@ jobs:
     needs: trivy
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -265,7 +266,7 @@ jobs:
     needs: trivy
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: actions/download-artifact@v4
         with:
           name: docker-images
@@ -320,7 +321,7 @@ jobs:
     needs: [docker-push, dast]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           repository: ${{ secrets.GITOPS_REPO }}
           token: ${{ secrets.GITOPS_TOKEN }}
