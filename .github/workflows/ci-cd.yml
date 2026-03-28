@@ -9,6 +9,7 @@ on:
 permissions:
   contents: read
   security-events: write
+  issues: write
 
 env:
   BACKEND_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/rag-backend
