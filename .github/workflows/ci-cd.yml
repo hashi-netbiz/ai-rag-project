@@ -151,6 +151,7 @@ jobs:
           context: .
           file: Dockerfile.backend
           push: false
+          tags: rag-backend:ci
           outputs: type=docker,dest=/tmp/backend-image.tar
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -161,6 +162,7 @@ jobs:
           file: Dockerfile.frontend
           build-args: FASTAPI_BASE_URL=http://backend:8000
           push: false
+          tags: rag-frontend:ci
           outputs: type=docker,dest=/tmp/frontend-image.tar
           cache-from: type=gha
           cache-to: type=gha,mode=max
@@ -185,16 +187,10 @@ jobs:
         run: |
           docker load --input /tmp/backend-image.tar
           docker load --input /tmp/frontend-image.tar
-      - name: Get backend image name
-        id: backend-img
-        run: echo "name=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep rag-backend | head -1)" >> $GITHUB_OUTPUT
-      - name: Get frontend image name
-        id: frontend-img
-        run: echo "name=$(docker images --format '{{.Repository}}:{{.Tag}}' | grep rag-frontend | head -1)" >> $GITHUB_OUTPUT
       - name: Scan backend image
         uses: aquasecurity/trivy-action@v0.35.0
         with:
-          image-ref: ${{ steps.backend-img.outputs.name }}
+          image-ref: rag-backend:ci
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: 1
@@ -203,7 +199,7 @@ jobs:
       - name: Scan frontend image
         uses: aquasecurity/trivy-action@v0.35.0
         with:
-          image-ref: ${{ steps.frontend-img.outputs.name }}
+          image-ref: rag-frontend:ci
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: 1
