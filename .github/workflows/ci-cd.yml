@@ -301,12 +301,14 @@ jobs:
           target: http://localhost:3001
           fail_action: false
           token: ${{ secrets.GITHUB_TOKEN }}
+          artifact_name: zap-frontend
       - name: ZAP scan — backend API
         uses: zaproxy/action-baseline@v0.13.0
         with:
           target: http://localhost:8000
           fail_action: false
           token: ${{ secrets.GITHUB_TOKEN }}
+          artifact_name: zap-backend
       - name: Tear down stack
         if: always()
         run: docker compose down
