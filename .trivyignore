@@ -1,0 +1,10 @@
+# Trivy vulnerability ignore list
+# Format: one CVE ID per line, optionally followed by a comment
+# Add entries here for accepted risks or confirmed false positives.
+#
+# node:24-alpine — no upstream fix available
+CVE-2026-31802
+CVE-2026-29786
+CVE-2026-27904
+CVE-2026-27903
+CVE-2026-33671
