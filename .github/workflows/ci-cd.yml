@@ -13,8 +13,8 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  BACKEND_IMAGE: 891612574910.dkr.ecr.us-east-1.amazonaws.com/hashi-netbiz/ai-rag-project
-  FRONTEND_IMAGE: 891612574910.dkr.ecr.us-east-1.amazonaws.com/hashi-netbiz/ai-rag-project
+  BACKEND_IMAGE: 891612574910.dkr.ecr.us-east-1.amazonaws.com/hashi-netbiz/ai-rag-project/backend
+  FRONTEND_IMAGE: 891612574910.dkr.ecr.us-east-1.amazonaws.com/hashi-netbiz/ai-rag-project/frontend
 
 jobs:
 
@@ -311,8 +311,8 @@ jobs:
           file: Dockerfile.backend
           push: true
           tags: |
-            ${{ env.BACKEND_IMAGE }}:backend-1.${{ github.run_number }}
-            ${{ env.BACKEND_IMAGE }}:backend-latest
+            ${{ env.BACKEND_IMAGE }}:v1.${{ github.run_number }}
+            ${{ env.BACKEND_IMAGE }}:latest
           cache-from: type=gha
       - name: Push frontend
         uses: docker/build-push-action@v7
@@ -322,8 +322,8 @@ jobs:
           build-args: FASTAPI_BASE_URL=http://backend:8000
           push: true
           tags: |
-            ${{ env.FRONTEND_IMAGE }}:frontend-1.${{ github.run_number }}
-            ${{ env.FRONTEND_IMAGE }}:frontend-latest
+            ${{ env.FRONTEND_IMAGE }}:v1.${{ github.run_number }}
+            ${{ env.FRONTEND_IMAGE }}:latest
           cache-from: type=gha
 
   # ── [7] DAST (master only) ────────────────────────────────────────────────
@@ -396,8 +396,8 @@ jobs:
       - name: Update image tags
         run: |
           cd gitops-repo
-          # kustomize: kustomize edit set image rag-backend=${{ env.BACKEND_IMAGE }}:backend-1.${{ github.run_number }}
-          # sed: sed -i "s|rag-backend:.*|rag-backend:backend-1.${{ github.run_number }}|" manifests/deployment.yaml
+          # kustomize: kustomize edit set image rag-backend=${{ env.BACKEND_IMAGE }}:v1.${{ github.run_number }}
+          # sed: sed -i "s|rag-backend:.*|rag-backend:v1.${{ github.run_number }}|" manifests/deployment.yaml
           echo "TODO: fill in manifest update command"
       - name: Commit and push
         run: |
