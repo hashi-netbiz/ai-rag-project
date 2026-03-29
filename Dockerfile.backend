@@ -1,91 +1,76 @@
 # ──────────────────────────────────────────────────────────────────────────────
 # Stage 1 — dependency installation
 #
-# A full-featured builder image is used here so that uv can resolve,
-# compile, and install all production packages into an isolated venv.
-# Nothing from this stage (uv binary, build tooling, cache) leaks into
-# the final image.
+# Full-featured builder so uv can resolve, compile bytecode, and populate
+# a venv.  Nothing from this stage reaches the final image.
 # ──────────────────────────────────────────────────────────────────────────────
 FROM python:3.11-slim-bookworm AS deps
 
 # Pin uv to a known release; copy only the single static binary
 COPY --from=ghcr.io/astral-sh/uv:0.5.21 /uv /usr/local/bin/uv
 
-# UV_COMPILE_BYTECODE  – pre-compile .pyc files so the runtime image never
-#                        needs to write to the filesystem on first import
-# UV_LINK_MODE=copy    – required for multi-stage: hardlinks don't cross
-#                        layer boundaries, so we copy instead
-# UV_PYTHON_DOWNLOADS  – never let uv fetch a Python interpreter; always
-#                        use the one supplied by the base image
+# UV_COMPILE_BYTECODE  – pre-compile .pyc files; runtime FS stays write-free
+# UV_LINK_MODE=copy    – required for multi-stage (no cross-layer hardlinks)
+# UV_PYTHON_DOWNLOADS  – always use the image's Python, never fetch another
 ENV UV_COMPILE_BYTECODE=1 \
     UV_LINK_MODE=copy \
     UV_PYTHON_DOWNLOADS=never
 
 WORKDIR /app
 
-# Separate the dependency-resolution layer from the application-code layer
-# so that rebuilds caused by code changes do not re-download packages.
+# Cache the heavy dependency-resolution step independently of app code changes
 COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Stage 2 — production runtime
+# Stage 2 — distroless production runtime
 #
-# Minimal image: no build tools, no uv binary, no ingestion scripts,
-# no root process.  Only the pre-built venv and application source are
-# present in the final layer.
+# gcr.io/distroless/python3-debian12 provides:
+#   • Python 3.11 at /usr/bin/python3  (same Debian Bookworm base as the
+#     builder, so compiled C-extension wheels are ABI-compatible)
+#   • No shell, no package manager, no apt, no login utilities
+#   • Predefined 'nonroot' user (uid 65532)
+#   • Regularly rebuilt by Google with upstream security patches
+#
+# The venv's Python symlinks point to /usr/local/bin/python3.11 which does
+# NOT exist in distroless.  We therefore copy only the installed
+# site-packages and let distroless's own Python interpreter own the process.
 # ──────────────────────────────────────────────────────────────────────────────
-FROM python:3.11-slim-bookworm AS runtime
-
-# Apply all available OS-level security patches before the image is frozen
-RUN apt-get update \
- && apt-get upgrade -y --no-install-recommends \
- && rm -rf /var/lib/apt/lists/*
-
-# Remove pip/setuptools – the venv is the only package-management surface
-# needed at runtime; stripping these reduces the available attack surface
-RUN pip uninstall -y pip setuptools 2>/dev/null || true
-
-# Dedicated unprivileged system account – UID/GID 1001, no home directory,
-# no login shell.  The container process will never run as root.
-RUN groupadd --system --gid 1001 appuser \
- && useradd  --system --uid 1001 --gid appuser --no-create-home appuser
+FROM gcr.io/distroless/python3-debian12 AS runtime
 
 WORKDIR /app
 
-# Import the pre-built virtual environment from the deps stage.
-# uv is not needed at runtime: uvicorn is called directly from the venv.
-COPY --from=deps --chown=1001:1001 /app/.venv /app/.venv
+# Pull only the installed packages — not the broken venv Python symlinks.
+# Pre-compiled .pyc files (from UV_COMPILE_BYTECODE) come along for free.
+COPY --from=deps --chown=65532:65532 /app/.venv/lib/python3.11/site-packages /app/lib
 
-# Copy only the serving application source.
-# The ingestion/ directory is a one-time data-loading CLI tool and must
-# not be part of the production serving surface.
-COPY --chown=1001:1001 backend/app ./app
+# Application source only; ingestion scripts are a one-time CLI tool and
+# must not be part of the production serving surface.
+COPY --chown=65532:65532 backend/app ./app
 
-# PATH    – make the venv's binaries (uvicorn, python, …) the default
-# PYTHONPATH – ensure `app` package is importable from /app without uv shim
-# PYTHONDONTWRITEBYTECODE – bytecode was pre-compiled in Stage 1; disable
-#             further .pyc writes so the runtime filesystem stays read-only-friendly
-# PYTHONUNBUFFERED – send logs straight to stdout/stderr (no buffering lag)
-# PYTHONFAULTHANDLER – emit a traceback to stderr on hard crashes (SIGSEGV etc.)
-ENV PATH="/app/.venv/bin:$PATH" \
-    PYTHONPATH=/app \
+# PYTHONPATH  – /app/lib exposes installed packages to distroless's Python;
+#               /app makes the `app` package importable as a top-level module
+# PYTHONDONTWRITEBYTECODE – bytecode is pre-compiled; disable further writes
+# PYTHONUNBUFFERED        – logs go straight to stdout/stderr with no lag
+# PYTHONFAULTHANDLER      – emit a traceback on SIGSEGV/SIGFPE for forensics
+ENV PYTHONPATH=/app/lib:/app \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PYTHONFAULTHANDLER=1
 
-# Drop to the unprivileged user for all subsequent layers and the CMD
-USER appuser
+# Use distroless's built-in unprivileged account — never root
+USER nonroot
 
 EXPOSE 8000
 
-# Built-in liveness probe using only the Python stdlib – no curl or wget
-# dependency.  Uses the absolute venv path so it is not affected by any
-# PATH-override at container start.
+# Health probe via Python stdlib — distroless has no curl, wget, or shell.
+# Use the absolute path; distroless PATH does not include a bare `python`.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD ["/app/.venv/bin/python", "-c", \
+    CMD ["/usr/bin/python3", "-c", \
          "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
 
-# Invoke uvicorn directly from the venv – no uv shim, no shell wrapper
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run uvicorn as a module so no venv shebang script is required.
+# distroless has no shell, so exec form is mandatory.
+CMD ["/usr/bin/python3", "-m", "uvicorn", "app.main:app", \
+     "--host", "0.0.0.0", "--port", "8000"]
