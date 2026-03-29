@@ -1,17 +1,73 @@
-FROM node:20-alpine AS builder
+# ──────────────────────────────────────────────────────────────────────────────
+# Stage 1 — build
+#
+# Use a Debian-slim Node image (not Alpine) so that any native addons
+# compiled here share the same glibc as the distroless Debian 12 runtime.
+# Alpine uses musl libc; mixing musl-compiled .node files with a glibc
+# runtime causes immediate segfaults.
+#
+# NODE_ENV is intentionally NOT set to 'production' here: npm ci must
+# install devDependencies (TypeScript, ESLint, Next.js compiler, …)
+# that are needed for the build but must not end up in the runtime image.
+# ──────────────────────────────────────────────────────────────────────────────
+FROM node:22-slim AS builder
+
 WORKDIR /app
+
+# Cache the dependency-install layer separately from the source tree so
+# that code-only changes do not trigger a full `npm ci` re-run.
 COPY frontend-next/package.json frontend-next/package-lock.json ./
 RUN npm ci
+
 COPY frontend-next/ .
+
+# FASTAPI_BASE_URL is baked into the Next.js bundle at build time via
+# the proxy route — it is a configuration value, not a secret.
 ARG FASTAPI_BASE_URL=http://localhost:8000
 ENV FASTAPI_BASE_URL=$FASTAPI_BASE_URL
+
+# output: 'standalone' (next.config.ts) produces a self-contained
+# server.js + minimal node_modules ready for a minimal runtime image.
 RUN npm run build
 
-FROM node:20-alpine AS runner
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Stage 2 — distroless production runtime
+#
+# gcr.io/distroless/nodejs22-debian12 provides:
+#   • Node.js 22 LTS at /nodejs/bin/node
+#   • No shell, no npm, no apt, no login utilities
+#   • Predefined 'nonroot' user (uid 65532)
+#   • Regularly rebuilt by Google with upstream security patches
+# ──────────────────────────────────────────────────────────────────────────────
+FROM gcr.io/distroless/nodejs22-debian12 AS runtime
+
 WORKDIR /app
-ENV NODE_ENV=production PORT=3001 HOSTNAME="0.0.0.0"
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-COPY --from=builder /app/public ./public
+
+# NODE_ENV=production tells Next.js to disable development overlays and
+# enable production optimisations.
+# HOSTNAME / PORT are consumed by the standalone server.js.
+ENV NODE_ENV=production \
+    PORT=3001 \
+    HOSTNAME=0.0.0.0
+
+# The standalone bundle is fully self-contained: it carries its own minimal
+# node_modules subset.  Static assets and public files are served directly
+# by the built-in file server, so no separate web server is needed.
+COPY --from=builder --chown=65532:65532 /app/.next/standalone ./
+COPY --from=builder --chown=65532:65532 /app/.next/static     ./.next/static
+COPY --from=builder --chown=65532:65532 /app/public           ./public
+
+# Use distroless's built-in unprivileged account — never root
+USER nonroot
+
 EXPOSE 3001
-CMD ["node", "server.js"]
+
+# Health probe using Node's built-in http module.
+# distroless has no shell, curl, or wget — exec form is mandatory.
+# Exit 0 if the server responds with any non-5xx status.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+    CMD ["/nodejs/bin/node", "-e", \
+         "require('http').get({host:'localhost',port:3001,path:'/'}, r => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))"]
+
+CMD ["/nodejs/bin/node", "server.js"]
