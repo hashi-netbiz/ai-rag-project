@@ -230,11 +230,65 @@ jobs:
           sarif_file: trivy-frontend.sarif
           category: trivy-frontend
 
-  # ── [5] Docker push (master only) ─────────────────────────────────────────
+  # ── [5] E2E regression tests ──────────────────────────────────────────────
+  e2e:
+    name: E2E regression tests
+    runs-on: ubuntu-latest
+    needs: trivy
+    steps:
+      - uses: actions/checkout@v5
+      - uses: docker/setup-buildx-action@v4
+      - name: Write .env
+        run: |
+          cat > backend/.env << 'EOF'
+          GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}
+          GOOGLE_API_KEY=${{ secrets.GOOGLE_API_KEY }}
+          PINECONE_API_KEY=${{ secrets.PINECONE_API_KEY }}
+          PINECONE_INDEX_NAME=${{ secrets.PINECONE_INDEX_NAME }}
+          JWT_SECRET_KEY=${{ secrets.JWT_SECRET_KEY }}
+          JWT_ALGORITHM=HS256
+          JWT_EXPIRE_MINUTES=60
+          LANGCHAIN_API_KEY=${{ secrets.LANGCHAIN_API_KEY }}
+          LANGCHAIN_TRACING_V2=false
+          LANGCHAIN_PROJECT=rag-rbac-chatbot
+          EOF
+      - name: Build and start stack
+        run: docker compose up -d --build
+        env:
+          BUILDX_GHA_CACHE_FROM: type=gha
+          BUILDX_GHA_CACHE_TO: type=gha,mode=max
+      - name: Wait for backend healthy
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:8000/health && echo && break || sleep 5
+          done
+      - name: Wait for frontend healthy
+        run: |
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:3001 > /dev/null && break || sleep 5
+          done
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "24"
+          cache: "npm"
+          cache-dependency-path: frontend-next/package-lock.json
+      - name: Install frontend deps (required for TypeScript section of E2E)
+        run: npm ci
+        working-directory: frontend-next
+      - name: Run E2E regression suite
+        run: bash test_e2e.sh
+      - name: Dump stack logs
+        if: failure()
+        run: docker compose logs
+      - name: Tear down stack
+        if: always()
+        run: docker compose down
+
+  # ── [6] Docker push (master only) ─────────────────────────────────────────
   docker-push:
     name: Push to Docker Hub
     runs-on: ubuntu-latest
-    needs: trivy
+    needs: [trivy, e2e]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     steps:
       - uses: actions/checkout@v5
@@ -265,11 +319,11 @@ jobs:
             ${{ env.FRONTEND_IMAGE }}:latest
           cache-from: type=gha
 
-  # ── [6] DAST (master only) ────────────────────────────────────────────────
+  # ── [7] DAST (master only) ────────────────────────────────────────────────
   dast:
     name: OWASP ZAP DAST
     runs-on: ubuntu-latest
-    needs: trivy
+    needs: [trivy, e2e]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     steps:
       - uses: actions/checkout@v5
@@ -320,7 +374,7 @@ jobs:
         if: always()
         run: docker compose down
 
-  # ── [7] GitOps update (master only, stub) ─────────────────────────────────
+  # ── [8] GitOps update (master only, stub) ─────────────────────────────────
   gitops-update:
     name: GitOps update
     runs-on: ubuntu-latest
