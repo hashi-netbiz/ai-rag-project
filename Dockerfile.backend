@@ -18,6 +18,10 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 WORKDIR /app
 
+# build-base provides g++/gcc/make needed to compile scikit-network
+# (a transitive dep of ragas that has no musllinux wheel on PyPI)
+RUN apk add --no-cache build-base
+
 # Cache the dependency-resolution step independently of app code changes
 COPY backend/pyproject.toml backend/uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
