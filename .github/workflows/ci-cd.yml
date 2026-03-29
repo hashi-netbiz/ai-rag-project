@@ -13,8 +13,8 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  BACKEND_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/rag-backend
-  FRONTEND_IMAGE: ${{ secrets.DOCKERHUB_USERNAME }}/rag-frontend
+  BACKEND_IMAGE: 891612574910.dkr.ecr.us-east-1.amazonaws.com/hashi-netbiz/ai-rag-project
+  FRONTEND_IMAGE: 891612574910.dkr.ecr.us-east-1.amazonaws.com/hashi-netbiz/ai-rag-project
 
 jobs:
 
@@ -286,17 +286,24 @@ jobs:
 
   # ── [6] Docker push (master only) ─────────────────────────────────────────
   docker-push:
-    name: Push to Docker Hub
+    name: Push to Amazon ECR
     runs-on: ubuntu-latest
     needs: [trivy, e2e]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v4
-      - uses: docker/login-action@v4
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          role-to-assume: arn:aws:iam::891612574910:role/github-actions
+          aws-region: us-east-1
+      - name: Log in to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
       - name: Push backend
         uses: docker/build-push-action@v7
         with:
@@ -304,8 +311,8 @@ jobs:
           file: Dockerfile.backend
           push: true
           tags: |
-            ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
-            ${{ env.BACKEND_IMAGE }}:latest
+            ${{ env.BACKEND_IMAGE }}:backend-1.${{ github.run_number }}
+            ${{ env.BACKEND_IMAGE }}:backend-latest
           cache-from: type=gha
       - name: Push frontend
         uses: docker/build-push-action@v7
@@ -315,8 +322,8 @@ jobs:
           build-args: FASTAPI_BASE_URL=http://backend:8000
           push: true
           tags: |
-            ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
-            ${{ env.FRONTEND_IMAGE }}:latest
+            ${{ env.FRONTEND_IMAGE }}:frontend-1.${{ github.run_number }}
+            ${{ env.FRONTEND_IMAGE }}:frontend-latest
           cache-from: type=gha
 
   # ── [7] DAST (master only) ────────────────────────────────────────────────
@@ -389,8 +396,8 @@ jobs:
       - name: Update image tags
         run: |
           cd gitops-repo
-          # kustomize: kustomize edit set image rag-backend=${{ env.BACKEND_IMAGE }}:${{ github.sha }}
-          # sed: sed -i "s|rag-backend:.*|rag-backend:${{ github.sha }}|" manifests/deployment.yaml
+          # kustomize: kustomize edit set image rag-backend=${{ env.BACKEND_IMAGE }}:backend-1.${{ github.run_number }}
+          # sed: sed -i "s|rag-backend:.*|rag-backend:backend-1.${{ github.run_number }}|" manifests/deployment.yaml
           echo "TODO: fill in manifest update command"
       - name: Commit and push
         run: |
