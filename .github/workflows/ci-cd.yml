@@ -209,18 +209,22 @@ jobs:
   trivy:
     name: Trivy container scan
     runs-on: ubuntu-latest
-    needs: docker-build
+    needs: [docker-build, changes]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/download-artifact@v7
+        if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
         with:
           name: docker-images
           path: /tmp
-      - name: Load images
-        run: |
-          docker load --input /tmp/backend-image.tar
-          docker load --input /tmp/frontend-image.tar
+      - name: Load backend image
+        if: needs.changes.outputs.backend == 'true'
+        run: docker load --input /tmp/backend-image.tar
+      - name: Load frontend image
+        if: needs.changes.outputs.frontend == 'true'
+        run: docker load --input /tmp/frontend-image.tar
       - name: Scan backend image
+        if: needs.changes.outputs.backend == 'true'
         uses: aquasecurity/trivy-action@v0.35.0
         with:
           image-ref: rag-backend:ci
@@ -231,6 +235,7 @@ jobs:
           format: sarif
           output: trivy-backend.sarif
       - name: Scan frontend image
+        if: needs.changes.outputs.frontend == 'true'
         uses: aquasecurity/trivy-action@v0.35.0
         with:
           image-ref: rag-frontend:ci
@@ -241,14 +246,14 @@ jobs:
           format: sarif
           output: trivy-frontend.sarif
       - name: Upload backend SARIF
+        if: needs.changes.outputs.backend == 'true'
         uses: github/codeql-action/upload-sarif@v4
-        if: always()
         with:
           sarif_file: trivy-backend.sarif
           category: trivy-backend
       - name: Upload frontend SARIF
+        if: needs.changes.outputs.frontend == 'true'
         uses: github/codeql-action/upload-sarif@v4
-        if: always()
         with:
           sarif_file: trivy-frontend.sarif
           category: trivy-frontend
