@@ -284,7 +284,7 @@ jobs:
         if: always()
         run: docker compose down
 
-  # ── [6] Docker push (master only) ─────────────────────────────────────────
+  # ── [6] Docker push (master only, lets go) ─────────────────────────────────────────
   docker-push:
     name: Push to Amazon ECR
     runs-on: ubuntu-latest
