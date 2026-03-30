@@ -30,6 +30,26 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # ── [1b] Path change detection ───────────────────────────────────────────
+  changes:
+    name: Detect file changes
+    runs-on: ubuntu-latest
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            backend:
+              - 'Dockerfile.backend'
+              - 'backend/**'
+            frontend:
+              - 'Dockerfile.frontend'
+              - 'frontend-next/**'
+
   # ── [2a] SAST ─────────────────────────────────────────────────────────────
   sonarcloud:
     name: SonarCloud
@@ -151,11 +171,12 @@ jobs:
   docker-build:
     name: Docker build
     runs-on: ubuntu-latest
-    needs: [sonarcloud, sca, unit-tests, lint-and-typecheck]
+    needs: [sonarcloud, sca, unit-tests, lint-and-typecheck, changes]
     steps:
       - uses: actions/checkout@v5
       - uses: docker/setup-buildx-action@v4
       - name: Build backend image
+        if: needs.changes.outputs.backend == 'true'
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -166,6 +187,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - name: Build frontend image
+        if: needs.changes.outputs.frontend == 'true'
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -177,6 +199,7 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - uses: actions/upload-artifact@v6
+        if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
         with:
           name: docker-images
           path: /tmp/*.tar
@@ -288,7 +311,7 @@ jobs:
   docker-push:
     name: Push to Amazon ECR
     runs-on: ubuntu-latest
-    needs: [trivy, e2e]
+    needs: [trivy, e2e, changes]
     if: github.ref == 'refs/heads/master' && github.event_name == 'push'
     permissions:
       id-token: write
@@ -305,6 +328,7 @@ jobs:
         id: login-ecr
         uses: aws-actions/amazon-ecr-login@v2
       - name: Push backend
+        if: needs.changes.outputs.backend == 'true'
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -315,6 +339,7 @@ jobs:
             ${{ env.BACKEND_IMAGE }}:latest
           cache-from: type=gha
       - name: Push frontend
+        if: needs.changes.outputs.frontend == 'true'
         uses: docker/build-push-action@v7
         with:
           context: .
