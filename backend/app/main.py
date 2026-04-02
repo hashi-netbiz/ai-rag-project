@@ -29,3 +29,4 @@ app.include_router(chat_router)
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
+
