@@ -192,7 +192,6 @@ jobs:
         with:
           context: .
           file: Dockerfile.frontend
-          build-args: FASTAPI_BASE_URL=http://backend:8000
           push: false
           tags: rag-frontend:ci
           outputs: type=docker,dest=/tmp/frontend-image.tar
@@ -355,7 +354,6 @@ jobs:
         with:
           context: .
           file: Dockerfile.frontend
-          build-args: FASTAPI_BASE_URL=http://backend:8000
           push: true
           tags: |
             ${{ env.FRONTEND_IMAGE }}:v1.${{ github.run_number }}

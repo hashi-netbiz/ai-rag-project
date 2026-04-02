@@ -3,15 +3,12 @@ WORKDIR /app
 COPY frontend-next/package.json frontend-next/package-lock.json ./
 RUN npm ci
 COPY frontend-next/ .
-ARG FASTAPI_BASE_URL=http://localhost:8000
-ENV FASTAPI_BASE_URL=$FASTAPI_BASE_URL
 RUN npm run build
 
 FROM node:24-alpine AS runner
 RUN apk upgrade --no-cache
 WORKDIR /app
-ARG FASTAPI_BASE_URL=http://localhost:8000
-ENV NODE_ENV=production PORT=3001 HOSTNAME="0.0.0.0" FASTAPI_BASE_URL=$FASTAPI_BASE_URL
+ENV NODE_ENV=production PORT=3001 HOSTNAME="0.0.0.0"
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static
 COPY --from=builder --chown=node:node /app/public ./public
