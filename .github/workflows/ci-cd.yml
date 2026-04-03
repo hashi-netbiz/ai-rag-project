@@ -347,17 +347,13 @@ jobs:
         run: |
           docker load --input /tmp/backend-image.tar
           docker tag rag-backend:ci ${{ env.BACKEND_IMAGE }}:v1.${{ github.run_number }}
-          docker tag rag-backend:ci ${{ env.BACKEND_IMAGE }}:latest
           docker push ${{ env.BACKEND_IMAGE }}:v1.${{ github.run_number }}
-          docker push ${{ env.BACKEND_IMAGE }}:latest
       - name: Load and push frontend
         if: needs.changes.outputs.frontend == 'true'
         run: |
           docker load --input /tmp/frontend-image.tar
           docker tag rag-frontend:ci ${{ env.FRONTEND_IMAGE }}:v1.${{ github.run_number }}
-          docker tag rag-frontend:ci ${{ env.FRONTEND_IMAGE }}:latest
           docker push ${{ env.FRONTEND_IMAGE }}:v1.${{ github.run_number }}
-          docker push ${{ env.FRONTEND_IMAGE }}:latest
 
   # ── [7] DAST (master only) ────────────────────────────────────────────────
   dast:
