@@ -45,9 +45,11 @@ jobs:
             backend:
               - 'Dockerfile.backend'
               - 'backend/**'
+              - '.github/workflows/ci-cd.yml'
             frontend:
               - 'Dockerfile.frontend'
               - 'frontend-next/**'
+              - '.github/workflows/ci-cd.yml'
 
   # ── [2a] SAST ─────────────────────────────────────────────────────────────
   sonarcloud:
