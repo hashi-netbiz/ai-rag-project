@@ -77,7 +77,11 @@ jobs:
 
       - name: Update production image tags
         run: |
+          mkdir -p gitops-repo/k8s/prod
           cd gitops-repo/k8s/prod
+          if [ ! -f kustomization.yaml ]; then
+            printf 'apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\n' > kustomization.yaml
+          fi
           if [ "${{ inputs.services }}" == "both" ] || [ "${{ inputs.services }}" == "backend" ]; then
             kustomize edit set image ${{ env.BACKEND_IMAGE }}=${{ env.BACKEND_IMAGE }}:${{ inputs.image_sha }}
           fi
