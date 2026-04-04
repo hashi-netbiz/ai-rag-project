@@ -1,0 +1,112 @@
+name: Promote to Production
+
+on:
+  workflow_dispatch:
+    inputs:
+      image_sha:
+        description: "Image SHA tag to promote (e.g. sha-abc1234def5678)"
+        required: true
+        type: string
+      services:
+        description: "Which service(s) to promote"
+        required: true
+        type: choice
+        options:
+          - both
+          - backend
+          - frontend
+        default: both
+      deploy_reason:
+        description: "Reason for this promotion (optional)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  BACKEND_IMAGE: 891612574910.dkr.ecr.us-east-1.amazonaws.com/hashi-netbiz/ai-rag-project/backend
+  FRONTEND_IMAGE: 891612574910.dkr.ecr.us-east-1.amazonaws.com/hashi-netbiz/ai-rag-project/frontend
+
+jobs:
+
+  promote:
+    name: Promote ${{ inputs.image_sha }} to production
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::891612574910:role/github-actions
+          aws-region: us-east-1
+
+      - name: Validate backend image exists in ECR
+        if: inputs.services == 'both' || inputs.services == 'backend'
+        run: |
+          aws ecr describe-images \
+            --repository-name hashi-netbiz/ai-rag-project/backend \
+            --image-ids imageTag=${{ inputs.image_sha }} \
+            --query 'imageDetails[0].imageTags' \
+            --output text
+          echo "Backend image ${{ inputs.image_sha }} confirmed in ECR."
+
+      - name: Validate frontend image exists in ECR
+        if: inputs.services == 'both' || inputs.services == 'frontend'
+        run: |
+          aws ecr describe-images \
+            --repository-name hashi-netbiz/ai-rag-project/frontend \
+            --image-ids imageTag=${{ inputs.image_sha }} \
+            --query 'imageDetails[0].imageTags' \
+            --output text
+          echo "Frontend image ${{ inputs.image_sha }} confirmed in ECR."
+
+      - name: Install kustomize
+        run: |
+          curl -s "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" | bash
+          sudo mv kustomize /usr/local/bin/
+
+      - uses: actions/checkout@v5
+        with:
+          repository: ${{ secrets.GITOPS_REPO }}
+          token: ${{ secrets.GITOPS_TOKEN }}
+          path: gitops-repo
+
+      - name: Update production image tags
+        run: |
+          cd gitops-repo/k8s/prod
+          if [ "${{ inputs.services }}" == "both" ] || [ "${{ inputs.services }}" == "backend" ]; then
+            kustomize edit set image ${{ env.BACKEND_IMAGE }}=${{ env.BACKEND_IMAGE }}:${{ inputs.image_sha }}
+          fi
+          if [ "${{ inputs.services }}" == "both" ] || [ "${{ inputs.services }}" == "frontend" ]; then
+            kustomize edit set image ${{ env.FRONTEND_IMAGE }}=${{ env.FRONTEND_IMAGE }}:${{ inputs.image_sha }}
+          fi
+
+      - name: Commit and push
+        run: |
+          cd gitops-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .
+          REASON="${{ inputs.deploy_reason }}"
+          MSG="chore: promote ${{ inputs.image_sha }} to prod [approved by ${{ github.actor }}]"
+          if [ -n "$REASON" ]; then
+            MSG="$MSG — $REASON"
+          fi
+          git diff --cached --quiet || git commit -m "$MSG" && git push
+
+      - name: Summary
+        run: |
+          echo "### Production Promotion Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Image SHA | \`${{ inputs.image_sha }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Services | ${{ inputs.services }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Approved by | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Reason | ${{ inputs.deploy_reason || 'N/A' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "ArgoCD will require a manual sync to apply changes to \`rag-prod\`." >> $GITHUB_STEP_SUMMARY

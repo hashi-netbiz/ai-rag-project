@@ -24,5 +24,8 @@ class Settings(BaseSettings):
     langchain_tracing_v2: str = "false"
     langchain_project: str = "rag-rbac-chatbot"
 
+    # CORS
+    allowed_origins: str = "http://localhost:3000,http://localhost:3001"
+
 
 settings = Settings()

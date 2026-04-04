@@ -22,7 +22,7 @@ A RAG-based chatbot with role-based access control (RBAC) for a company intranet
 | python-jose + passlib | JWT auth and bcrypt password hashing |
 | Langsmith | Query tracing and observability |
 | Ragas | RAG evaluation metrics |
-| pytest + pytest-cov | Backend unit tests (52 tests, 89% coverage) |
+| pytest + pytest-cov | Backend unit tests (73 tests, 99% coverage) |
 | Next.js 15 + React 19 + TypeScript | Chat frontend (App Router) |
 | Tailwind CSS v4 + shadcn/ui | Frontend styling and components |
 | Zustand | Frontend state management |
@@ -87,7 +87,9 @@ rag_project/
 ├── test_e2e.sh                   # 42-test E2E regression suite
 ├── .github/
 │   └── workflows/
-│       └── ci-cd.yml             # DevSecOps pipeline (7 stages)
+│       ├── ci.yml                # PR validation (secret scan, SAST, SCA, tests, Docker build, Trivy)
+│       ├── deploy.yml            # Post-merge deploy (E2E → ECR push → DAST → GitOps update)
+│       └── promote-prod.yml      # Manual production promotion with GitHub Environment approval gate
 ├── resources/
 │   └── data/                     # Source documents — DO NOT MODIFY
 │       ├── finance/              # financial_summary.md, quarterly_financial_report.md
@@ -219,7 +221,7 @@ Next.js UI (port 3001) → /api/chat/query (proxy)
 ## Testing & Validation
 
 ```bash
-# Run backend unit tests (52 tests, no real API keys needed)
+# Run backend unit tests (73 tests, no real API keys needed)
 cd backend && uv run pytest tests/ -v --cov=app --cov-report=term-missing
 
 # Verify backend imports are clean
@@ -255,10 +257,12 @@ docker compose build && docker compose up -d
 | `backend/app/chat/rag_service.py` | Core RAG pipeline — retrieve → rerank → generate |
 | `backend/app/vector_store/pinecone_client.py` | RBAC-filtered Pinecone retriever (k=6) |
 | `backend/app/auth/service.py` | JWT logic + demo user store |
-| `backend/tests/` | Unit tests — 52 tests, 89% coverage |
+| `backend/tests/` | Unit tests — 73 tests, 99% coverage |
 | `backend/ingestion/ingest.py` | Run this once to populate Pinecone |
-| `backend/app/config.py` | All env var config in one place |
-| `.github/workflows/ci-cd.yml` | GitHub Actions DevSecOps pipeline |
+| `backend/app/config.py` | All env var config in one place (incl. `ALLOWED_ORIGINS`) |
+| `.github/workflows/ci.yml` | PR validation workflow |
+| `.github/workflows/deploy.yml` | Post-merge deploy workflow (ECR push + GitOps update) |
+| `.github/workflows/promote-prod.yml` | Manual production promotion with approval gate |
 | `Dockerfile.backend` / `Dockerfile.frontend` | Container images |
 | `docker-compose.yml` | Full stack orchestration |
 | `sonar-project.properties` | SonarCloud SAST config (update projectKey/org) |
@@ -272,8 +276,9 @@ docker compose build && docker compose up -d
 | Topic | File |
 |-------|------|
 | Full product requirements | `PRD.md` |
+| GitOps CI/CD requirements | `NEW_PRD.md` |
 | RAG pipeline plan | `.agents/plans/phase-4-rag-pipeline.md` |
-| CI/CD pipeline plan | `.claude/plans/frolicking-tickling-turtle.md` |
+| GitOps CI/CD plan | `.agents/plans/phase-4-gitops-cicd.md` |
 | Source documents | `resources/data/` |
 
 ---
@@ -287,6 +292,8 @@ docker compose build && docker compose up -d
 - RBAC is enforced server-side at retrieval — do not add role checks in the frontend as a substitute
 - **LLM:** `llama-3.3-70b-versatile` — do NOT use `llama-3.1-70b-versatile` (decommissioned by Groq)
 - **Embedding:** `models/gemini-embedding-2-preview` — do NOT use `text-embedding-004` or `gemini-embedding-001`
-- **Frontend runs on port 3001** — CORS in `main.py` already allows both 3000 and 3001
+- **Frontend runs on port 3001** — CORS origins are env-var driven via `ALLOWED_ORIGINS` in `.env`; defaults to `http://localhost:3000,http://localhost:3001`
 - **`sonar-project.properties`** — replace `YOUR_SONAR_PROJECT_KEY` and `YOUR_SONAR_ORG` before SonarCloud runs
-- **`GITOPS_REPO` secret** — not yet set in GitHub Actions; required for the gitops-update job stub
+- **`GITOPS_REPO` / `GITOPS_TOKEN` secrets** — required by `deploy.yml` (gitops-update job) and `promote-prod.yml`; must be set in GitHub Actions repo secrets
+- **GitHub Environment `production`** — must be created in GitHub repo settings with required reviewer(s) for `promote-prod.yml` approval gate to work
+- **ECR tag mutability** — backend and frontend ECR repos must be set to `MUTABLE` to allow `staging-latest` re-pushes; production always uses the immutable `sha-<github.sha>` tag
