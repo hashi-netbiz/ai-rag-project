@@ -16,7 +16,7 @@ export default function RootLayout({
   return (
     <html lang="en" suppressHydrationWarning>
       <body
-        className={`${GeistSans.variable} ${GeistMono.variable} font-sans antialiased bg-white dark:bg-neutral-950 text-neutral-900 dark:text-neutral-100`}
+        className={`${GeistSans.variable} ${GeistMono.variable} font-sans antialiased text-foreground bg-black bg-[url('/couple.jpg')] bg-contain bg-no-repeat bg-center`}
         suppressHydrationWarning
       >
         {children}

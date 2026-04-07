@@ -54,17 +54,18 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-neutral-50 dark:bg-neutral-950 p-4">
+    <div className="min-h-screen flex items-center justify-center p-4 relative">
+      <div className="absolute inset-0 bg-white/60" />
       <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.3 }}
-        className="w-full max-w-sm"
+        className="w-full max-w-sm relative z-10"
       >
-        <Card className="shadow-lg border-neutral-200 dark:border-neutral-800">
+        <Card className="shadow-lg border-border">
           <CardHeader className="space-y-2 pb-4">
             <div className="flex items-center gap-2">
-              <Building2 size={22} className="text-blue-600" />
+              <Building2 size={22} className="text-primary" />
               <CardTitle className="text-xl">Company Assistant</CardTitle>
             </div>
             <CardDescription>
