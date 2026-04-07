@@ -106,17 +106,17 @@ export default function ChatPage() {
   return (
     <>
       {/* Sidebar */}
-      <aside className="w-64 flex-shrink-0 border-r border-neutral-200 dark:border-neutral-800 bg-white dark:bg-neutral-900 flex flex-col">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-200 dark:border-neutral-800">
+      <aside className="w-64 flex-shrink-0 border-r border-black/10 bg-white/75 backdrop-blur-md flex flex-col">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-black/10">
           <div className="flex items-center gap-2">
-            <Building2 size={18} className="text-blue-600" />
+            <Building2 size={18} className="text-primary" />
             <span className="font-semibold text-sm">Company Assistant</span>
           </div>
           <ThemeToggle />
         </div>
 
         <div className="px-4 py-4 space-y-2">
-          <p className="text-xs text-neutral-500 dark:text-neutral-400 uppercase tracking-wider font-medium">
+          <p className="text-xs text-muted-foreground uppercase tracking-wider font-medium">
             Signed in as
           </p>
           <p className="text-sm font-medium truncate">{user.username}</p>
@@ -126,17 +126,17 @@ export default function ChatPage() {
         <Separator />
 
         <div className="flex-1 px-4 py-3">
-          <p className="text-xs text-neutral-400 dark:text-neutral-600">
+          <p className="text-xs text-muted-foreground/60">
             Conversation history coming soon
           </p>
         </div>
 
-        <div className="px-4 py-4 space-y-2 border-t border-neutral-200 dark:border-neutral-800">
+        <div className="px-4 py-4 space-y-2 border-t border-black/10">
           <Button
             variant="ghost"
             size="sm"
             onClick={clearMessages}
-            className="w-full justify-start gap-2 text-neutral-600 dark:text-neutral-400 hover:text-neutral-900 dark:hover:text-neutral-100"
+            className="w-full justify-start gap-2 text-muted-foreground hover:text-foreground"
           >
             <Trash2 size={14} />
             Clear chat
@@ -145,7 +145,7 @@ export default function ChatPage() {
             variant="ghost"
             size="sm"
             onClick={handleLogout}
-            className="w-full justify-start gap-2 text-neutral-600 dark:text-neutral-400 hover:text-red-600 dark:hover:text-red-400"
+            className="w-full justify-start gap-2 text-muted-foreground hover:text-destructive"
           >
             <LogOut size={14} />
             Sign out
@@ -154,11 +154,11 @@ export default function ChatPage() {
       </aside>
 
       {/* Main */}
-      <main className="flex-1 flex flex-col overflow-hidden bg-neutral-50 dark:bg-neutral-950">
-        <div className="flex items-center justify-between px-6 py-3 bg-white dark:bg-neutral-900 border-b border-neutral-200 dark:border-neutral-800 shadow-sm">
+      <main className="flex-1 flex flex-col overflow-hidden bg-transparent">
+        <div className="flex items-center justify-between px-6 py-3 bg-white/75 backdrop-blur-md border-b border-black/10 shadow-sm">
           <div>
             <h1 className="text-sm font-semibold">Knowledge Base Chat</h1>
-            <p className="text-xs text-neutral-500 dark:text-neutral-400">
+            <p className="text-xs text-muted-foreground">
               Answers grounded in documents you are authorized to see
             </p>
           </div>
@@ -174,31 +174,33 @@ export default function ChatPage() {
                 animate={{ opacity: 1 }}
                 className="flex flex-col items-center justify-center min-h-[400px] text-center"
               >
-                <Building2
-                  size={40}
-                  className="text-neutral-300 dark:text-neutral-700 mb-4"
-                />
-                <h2 className="text-base font-medium text-neutral-700 dark:text-neutral-300 mb-1">
-                  Welcome, {user.username}
-                </h2>
-                <p className="text-sm text-neutral-400 dark:text-neutral-500 mb-6 max-w-xs">
-                  You have access to{' '}
-                  <span className="font-medium capitalize">
-                    {user.role.replace('_', ' ')}
-                  </span>{' '}
-                  documents. Ask anything.
-                </p>
-                <div className="space-y-2 w-full max-w-sm">
-                  {suggestions.map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => void sendQuery(s)}
-                      className="w-full text-left text-sm px-4 py-2.5 rounded-lg border border-neutral-200 dark:border-neutral-700 bg-white dark:bg-neutral-900 hover:bg-neutral-50 dark:hover:bg-neutral-800 text-neutral-700 dark:text-neutral-300 transition-colors"
-                      type="button"
-                    >
-                      {s}
-                    </button>
-                  ))}
+                <div className="bg-white/85 backdrop-blur-md rounded-2xl px-8 py-8 shadow-sm max-w-sm w-full">
+                  <Building2
+                    size={40}
+                    className="text-muted-foreground/40 mb-4 mx-auto"
+                  />
+                  <h2 className="text-base font-medium text-foreground mb-1">
+                    Welcome, {user.username}
+                  </h2>
+                  <p className="text-sm text-muted-foreground mb-6">
+                    You have access to{' '}
+                    <span className="font-medium capitalize">
+                      {user.role.replace('_', ' ')}
+                    </span>{' '}
+                    documents. Ask anything.
+                  </p>
+                  <div className="space-y-2">
+                    {suggestions.map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => void sendQuery(s)}
+                        className="w-full text-left text-sm px-4 py-2.5 rounded-lg border border-border bg-white/60 hover:bg-white/90 text-foreground transition-colors"
+                        type="button"
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </motion.div>
             ) : (
@@ -228,7 +230,7 @@ export default function ChatPage() {
           <div ref={bottomRef} />
         </ScrollArea>
 
-        <div className="px-6 py-4 bg-white dark:bg-neutral-900 border-t border-neutral-200 dark:border-neutral-800">
+        <div className="px-6 py-4 bg-white/75 backdrop-blur-md border-t border-black/10">
           <form onSubmit={handleSubmit} className="flex gap-3 items-end">
             <Textarea
               value={input}
@@ -237,18 +239,18 @@ export default function ChatPage() {
               placeholder={`Ask about ${user.role.replace('_', ' ')} information…`}
               disabled={isLoading}
               rows={1}
-              className="flex-1 resize-none min-h-[42px] max-h-32 bg-neutral-50 dark:bg-neutral-800 border-neutral-200 dark:border-neutral-700 focus-visible:ring-blue-500"
+              className="flex-1 resize-none min-h-[42px] max-h-32 bg-white/60 border-border focus-visible:ring-ring"
             />
             <Button
               type="submit"
               disabled={isLoading || !input.trim()}
-              className="bg-blue-600 hover:bg-blue-700 text-white shrink-0"
+              className="bg-primary hover:bg-primary/90 text-primary-foreground shrink-0"
             >
               <Send size={16} />
               <span className="ml-1.5">Send</span>
             </Button>
           </form>
-          <p className="text-xs text-neutral-400 dark:text-neutral-600 mt-1.5">
+          <p className="text-xs text-muted-foreground mt-1.5">
             Enter to send · Shift+Enter for new line
           </p>
         </div>
