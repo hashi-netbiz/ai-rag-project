@@ -15,6 +15,7 @@ from app.vector_store.pinecone_client import get_retriever
 logger = logging.getLogger(__name__)
 
 GROQ_MODEL = "llama-3.3-70b-versatile"
+NO_ACCESS_MSG = "I don't have access to that information."
 
 SYSTEM_PROMPT = """You are a company knowledge assistant. Answer questions based ONLY on the provided context.
 If the context does not contain relevant information to answer the question, respond with exactly:
@@ -74,7 +75,7 @@ def rag_query(query: str, role: str) -> dict:
 
     if not allowed_depts:
         return {
-            "answer": "I don't have access to that information.",
+            "answer": NO_ACCESS_MSG,
             "sources": [],
             "role": role,
             "guardrail_flags": [],
@@ -86,7 +87,7 @@ def rag_query(query: str, role: str) -> dict:
 
     if not docs:
         return {
-            "answer": "I don't have access to that information.",
+            "answer": NO_ACCESS_MSG,
             "sources": [],
             "role": role,
             "guardrail_flags": [],
@@ -105,7 +106,7 @@ def rag_query(query: str, role: str) -> dict:
 
     if should_fallback:
         return {
-            "answer": "I don't have access to that information.",
+            "answer": NO_ACCESS_MSG,
             "sources": [],
             "role": role,
             "guardrail_flags": ctx_flags,
