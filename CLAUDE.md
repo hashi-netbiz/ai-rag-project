@@ -22,7 +22,7 @@ A RAG-based chatbot with role-based access control (RBAC) for a company intranet
 | python-jose + passlib | JWT auth and bcrypt password hashing |
 | Langsmith | Query tracing and observability |
 | Ragas | RAG evaluation metrics |
-| pytest + pytest-cov | Backend unit tests (73 tests, 99% coverage) |
+| pytest + pytest-cov | Backend unit tests (154 tests, 99% coverage) |
 | Next.js 15 + React 19 + TypeScript | Chat frontend (App Router) |
 | Tailwind CSS v4 + shadcn/ui | Frontend styling and components |
 | Zustand | Frontend state management |
@@ -109,8 +109,15 @@ rag_project/
 │   │   │   ├── models.py         # Pydantic schemas (User, Token)
 │   │   │   └── service.py        # JWT create/verify, user store, bcrypt
 │   │   ├── chat/
-│   │   │   ├── router.py         # POST /chat/query
-│   │   │   └── rag_service.py    # Full RAG pipeline (retrieve → rerank → generate)
+│   │   │   ├── router.py         # POST /chat/query (input guardrails wired here)
+│   │   │   └── rag_service.py    # Full RAG pipeline (retrieve → rerank → guardrails → generate)
+│   │   ├── guardrails/           # Multi-layer guardrail module
+│   │   │   ├── __init__.py       # Re-exports runner functions + event models
+│   │   │   ├── models.py         # GuardrailAction enum, GuardrailEvent dataclass
+│   │   │   ├── input_guards.py   # check_query_length, check_prompt_injection, check_pii
+│   │   │   ├── context_guards.py # sanitize_context_docs, check_source_trust, check_relevance_threshold
+│   │   │   ├── output_guards.py  # check_refusal, check_faithfulness, check_response_length
+│   │   │   └── runner.py         # run_input/context/output_guardrails orchestrators
 │   │   ├── rbac/
 │   │   │   └── permissions.py    # ROLE_PERMISSIONS + get_allowed_departments()
 │   │   └── vector_store/
@@ -120,7 +127,8 @@ rag_project/
 │   │   ├── test_rbac.py          # RBAC permission logic tests
 │   │   ├── test_auth.py          # Auth service + JWT tests
 │   │   ├── test_rag_service.py   # _extract_sources, _rerank unit tests
-│   │   └── test_routes.py        # FastAPI route integration tests
+│   │   ├── test_routes.py        # FastAPI route integration tests
+│   │   └── test_guardrails.py    # Guardrail unit tests (81 tests, all layers + runners)
 │   └── ingestion/
 │       ├── ingest.py             # One-time ingestion entry point
 │       ├── loaders.py            # MD + CSV document loaders
@@ -148,16 +156,21 @@ rag_project/
 Next.js UI (port 3001) → /api/chat/query (proxy)
          → FastAPI POST /chat/query (JWT)
          → get_current_user() extracts role from JWT
+         → [A] Input guardrails: length check → injection detection → PII sanitize
          → get_allowed_departments(role) → list of permitted dept tags
          → embed query with Google gemini-embedding-2-preview (768-dim)
          → Pinecone query with filter: {department: {$in: allowed_depts}}, k=6
          → Pinecone rerank: bge-reranker-v2-m3 → top 3 chunks
+         → [B] Context guardrails: source trust → relevance threshold → context sanitize
          → LCEL chain: chunks + prompt → Groq Llama 3.3 70B
-         → response + source citations returned
-         → Langsmith traces entire chain
+         → [C] Output guardrails: refusal detection → faithfulness → length cap
+         → response + source citations + guardrail_flags returned
+         → Langsmith traces entire chain (guardrail flags attached as metadata)
 ```
 
 **RBAC is enforced at the retrieval layer** — the Pinecone metadata filter is applied server-side before any content reaches the LLM. The LLM never sees unauthorized documents.
+
+**Guardrails are defense-in-depth** — three layers enforce safety at input, context, and output. Every API response includes a `guardrail_flags` list (empty on clean requests) indicating which checks fired.
 
 ---
 
@@ -185,6 +198,15 @@ Next.js UI (port 3001) → /api/chat/query (proxy)
 - Use LCEL (`_prompt | _get_llm() | StrOutputParser()`) — not `RetrievalQAWithSourcesChain` (requires `source` key; our metadata uses `source_file`)
 - Wrap the top-level function with `@traceable` for Langsmith
 - Prompt instructs LLM to answer only from context and cite sources
+
+### Guardrail Patterns
+
+- Three runner functions in `guardrails/runner.py`: `run_input_guardrails`, `run_context_guardrails`, `run_output_guardrails`
+- Input guardrails run in `chat/router.py` (HTTP boundary) — hard blocks raise `HTTPException(400)`; PII is sanitized and the redacted query continues
+- Context guardrails run in `chat/rag_service.py` after `_rerank()` — source trust violations raise `HTTPException(403)`; low relevance triggers the canned fallback
+- Output guardrails run in `chat/rag_service.py` after `chain.invoke()` — all are non-blocking (flag or truncate only)
+- `QueryResponse` includes `guardrail_flags: list[str] = []` — empty on clean requests; contains check names when a guardrail fired
+- All guardrail thresholds are config-driven via `config.py` (e.g. `GUARDRAIL_RELEVANCE_THRESHOLD=0.1`); defaults are safe/permissive
 
 ### Error Handling
 - FastAPI `HTTPException` for all API errors (401, 403, 422, 500)
@@ -221,7 +243,7 @@ Next.js UI (port 3001) → /api/chat/query (proxy)
 ## Testing & Validation
 
 ```bash
-# Run backend unit tests (73 tests, no real API keys needed)
+# Run backend unit tests (154 tests, no real API keys needed)
 cd backend && uv run pytest tests/ -v --cov=app --cov-report=term-missing
 
 # Verify backend imports are clean
@@ -254,10 +276,14 @@ docker compose build && docker compose up -d
 | File | Purpose |
 |------|---------|
 | `backend/app/rbac/permissions.py` | Role → department mapping — edit here to change access rules |
-| `backend/app/chat/rag_service.py` | Core RAG pipeline — retrieve → rerank → generate |
+| `backend/app/chat/rag_service.py` | Core RAG pipeline — retrieve → rerank → guardrails → generate |
+| `backend/app/guardrails/` | Multi-layer guardrail module (input, context, output) |
+| `backend/app/guardrails/runner.py` | Orchestrators — edit here to add/remove guardrail checks |
+| `backend/app/guardrails/input_guards.py` | Injection patterns + PII patterns — edit to tune detection |
 | `backend/app/vector_store/pinecone_client.py` | RBAC-filtered Pinecone retriever (k=6) |
 | `backend/app/auth/service.py` | JWT logic + demo user store |
-| `backend/tests/` | Unit tests — 73 tests, 99% coverage |
+| `backend/tests/` | Unit tests — 154 tests, 99% coverage |
+| `backend/tests/test_guardrails.py` | Guardrail unit tests — 81 tests, all layers + runners |
 | `backend/ingestion/ingest.py` | Run this once to populate Pinecone |
 | `backend/app/config.py` | All env var config in one place (incl. `ALLOWED_ORIGINS`) |
 | `.github/workflows/ci.yml` | PR validation workflow |

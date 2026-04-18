@@ -27,5 +27,17 @@ class Settings(BaseSettings):
     # CORS
     allowed_origins: str = "http://localhost:3000,http://localhost:3001"
 
+    # Guardrails — Input
+    guardrail_max_query_length: int = 500
+    guardrail_injection_block: bool = True
+    guardrail_pii_sanitize: bool = True
+
+    # Guardrails — Context
+    guardrail_relevance_threshold: float = 0.0  # 0.0 = disabled; set to e.g. 0.1 to enable
+
+    # Guardrails — Output
+    guardrail_max_response_length: int = 2000
+    guardrail_min_answer_length_faithfulness: int = 50
+
 
 settings = Settings()

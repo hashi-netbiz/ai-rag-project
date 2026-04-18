@@ -138,7 +138,7 @@ def test_rag_query_response_keys():
          patch("app.chat.rag_service._get_llm", return_value=mock_llm):
         mock_get_retriever.return_value = _make_retriever(docs)
         result = rag_query("query", "finance")
-    assert set(result.keys()) == {"answer", "sources", "role"}
+    assert set(result.keys()) == {"answer", "sources", "role", "guardrail_flags"}
 
 
 def test_rag_query_role_passthrough():
